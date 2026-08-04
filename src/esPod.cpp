@@ -67,8 +67,8 @@ void esPod::_rxTask(void *pvParameters)
     uint32_t expLength = 0;
     uint32_t cursor = 0;
 
-    unsigned long lastByteRX = millis();   // Last time a byte was RXed in a packet
-    unsigned long lastActivity = millis(); // Last time any RX activity was detected
+    unsigned long lastByteRX = platform::millis();   // Last time a byte was RXed in a packet
+    unsigned long lastActivity = platform::millis(); // Last time any RX activity was detected
 
     aapCommand cmd;
 
@@ -105,12 +105,12 @@ void esPod::_rxTask(void *pvParameters)
             while (esPodInstance->_uart.available())
             {
                 // Timestamping the last activity on RX
-                lastActivity = millis();
+                lastActivity = platform::millis();
                 incByte = esPodInstance->_uart.read();
                 // If we are not in the middle of a RX, and we receive a 0xFF 0x55, start sequence, reset expected length and position cursor
                 if (prevByte == 0xFF && incByte == 0x55 && !esPodInstance->_rxIncomplete)
                 {
-                    lastByteRX = millis();
+                    lastByteRX = platform::millis();
                     esPodInstance->_rxIncomplete = true;
                     expLength = 0;
                     cursor = 0;
@@ -118,7 +118,7 @@ void esPod::_rxTask(void *pvParameters)
                 else if (esPodInstance->_rxIncomplete)
                 {
                     // Timestamping the last byte received
-                    lastByteRX = millis();
+                    lastByteRX = platform::millis();
                     // Expected length has not been received yet
                     if (expLength == 0 && cursor == 0)
                     {
@@ -179,7 +179,7 @@ void esPod::_rxTask(void *pvParameters)
                 // Always update the previous byte
                 prevByte = incByte;
             }
-            if (esPodInstance->_rxIncomplete && millis() - lastByteRX > INTERBYTE_TIMEOUT) // If we are in the middle of a packet and we haven't received a byte in 1s, discard the packet
+            if (esPodInstance->_rxIncomplete && platform::millis() - lastByteRX > INTERBYTE_TIMEOUT) // If we are in the middle of a packet and we haven't received a byte in 1s, discard the packet
             {
                 ESP_LOGW(__func__, "Packet incomplete, discarding");
                 esPodInstance->_rxIncomplete = false;
@@ -187,10 +187,10 @@ void esPod::_rxTask(void *pvParameters)
                 // cmd.length = 0;
                 // TODO: Send a NACK to the Accessory
             }
-            if (millis() - lastActivity > SERIAL_TIMEOUT) // If we haven't received any byte in 30s, reset the RX state
+            if (platform::millis() - lastActivity > SERIAL_TIMEOUT) // If we haven't received any byte in 30s, reset the RX state
             {
                 // Reset the timestamp for next Serial timeout
-                lastActivity = millis();
+                lastActivity = platform::millis();
 #ifndef NO_RESET_ON_SERIAL_TIMEOUT
                 ESP_LOGW(__func__, "No activity in %lu ms, resetting RX state", SERIAL_TIMEOUT);
                 esPodInstance->resetState();

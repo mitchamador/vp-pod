@@ -6,6 +6,7 @@
 #include "esPod_conf.h"
 #include "esPod_utils.h"
 #include "IUart.h"
+#include "platform.h"
 
 #ifndef IPOD_TAG
 #define IPOD_TAG "esPod"

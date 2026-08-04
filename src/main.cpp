@@ -152,8 +152,11 @@ void avrc_rn_volumechange_callback(int volume);
 void avrc_rn_volumechange_completed_callback(int volume);
 #endif
 void playStatusHandler(byte playCommand);
-#if !defined(AUDIOKIT) || defined(TRACK_POSITION_FIX)
+#if defined(TRACK_POSITION_FIX)
 void read_data_stream(const uint8_t *data, uint32_t length);
+#endif
+#ifdef TRACK_CHANGE_CALLBACK
+void avrc_rn_track_change_callback(uint8_t *id);
 #endif
 
 #pragma endregion
@@ -226,15 +229,15 @@ void setup()
 
 	// Inform of possible errors that led to a reset
 	ESP_LOGI("RESET", "Reset reason: %d", esp_reset_reason());
-	delay(5);
+	platform::delay(5);
 
 	// Publish build information
 	ESP_LOGI("BUILD_INFO", "env:%s\t date: %s\t time: %s", PIOENV, __DATE__, __TIME__);
-	delay(5);
+	platform::delay(5);
 	ESP_LOGI("VERSION", "%s", VERSION_STRING);
-	delay(5);
+	platform::delay(5);
 	ESP_LOGI("BRANCH", "%s", VERSION_BRANCH);
-	delay(5);
+	platform::delay(5);
 
 	if (initializeAVRCTask() != ESP_OK)
 		esp_restart();
@@ -251,16 +254,18 @@ void setup()
 	ESP_LOGI("SETUP", "Setup finished");
 }
 
-uint32_t start_key_pressed = 0;
-bool clean_last_connection;
 
 void loop()
 {
 #ifdef RESET_STATE_KEY
+	
+	uint32_t start_key_pressed = 0;
+	bool clean_last_connection;
+	
 	if (digitalRead(RESET_STATE_KEY) == 0)
 	{
 		if (start_key_pressed != 0) {
-			if (!clean_last_connection && millis() - start_key_pressed > 10000)
+			if (!clean_last_connection && platform::millis() - start_key_pressed > 10000)
 			{
 				ESP_LOGI("MAIN", "Clean last connection");
 				if (a2dp_sink.get_connection_state() != ESP_A2D_CONNECTION_STATE_DISCONNECTED)
@@ -271,7 +276,7 @@ void loop()
 				clean_last_connection = true;
 			}
 		} else {
-			start_key_pressed = millis();
+			start_key_pressed = platform::millis();
 		}
 	}
 	else
@@ -279,6 +284,7 @@ void loop()
 		start_key_pressed = 0;
 		clean_last_connection = false;
 	}
+
 #endif
 
 	if (peer_state == PEER_DISCONNECTED) {
@@ -286,7 +292,7 @@ void loop()
 		ESP_LOGI("MAIN", "Waiting for peer");
 	} else if (peer_state == PEER_CONNECTING && a2dp_sink.get_connection_state() == ESP_A2D_CONNECTION_STATE_CONNECTED)
 	{
-		delay(50);
+		platform::delay(50);
 		peer_state = PEER_CONNECTED;
 #ifdef USE_PEER_NAME
 		espod._peer_name = a2dp_sink.get_peer_name();
@@ -299,7 +305,7 @@ void loop()
 	{
 		peer_state = PEER_DISCONNECTED;
 	}
-	delay(10);
+	platform::delay(10);
 }
 
 #pragma region AVRC Task and Queue declaration/definition
@@ -558,7 +564,7 @@ static void processAVRCTask(void *pvParameters)
 					ESP_LOGD("AVRC_CB",
 							 "Artist+Album+Title+Duration +++ ACK Pending "
 							 "0x%x\n\tPending duration: %d",
-							 espod.trackChangeAckPending, millis() - espod.trackChangeTimestamp);
+							 espod.trackChangeAckPending, platform::millis() - espod.trackChangeTimestamp);
 					// espod.L0x04_0x01_iPodAck(iPodAck_OK, espod.trackChangeAckPending);
 					if (espod.trackChangeAckPending == 0x11)
 					{
@@ -584,17 +590,17 @@ static void processAVRCTask(void *pvParameters)
 					// force Audi MMI to redraw track's information
 					if (_trackChangeAckPending == 0x00)
 					{
-						espod.trackChangeTimestamp = millis();
+						espod.trackChangeTimestamp = platform::millis();
 						L0x04::_0x27_PlayStatusNotification(&espod, 0x01, trackNum < prevTrackNum ? 0 : TOTAL_NUM_TRACKS - 1);
 					}
 
-					uint32_t trackNotificationDelay = millis() - espod.trackChangeTimestamp;
+					uint32_t trackNotificationDelay = platform::millis() - espod.trackChangeTimestamp;
 					if (trackNotificationDelay > 0 && trackNotificationDelay < TRACK_CHANGE_NOTIFICATION_TIMEOUT)
 					{
 						vTaskDelay(pdMS_TO_TICKS(TRACK_CHANGE_NOTIFICATION_TIMEOUT - trackNotificationDelay));
 					}
 
-					espod.trackChangeCompletedTimestamp = millis();
+					espod.trackChangeCompletedTimestamp = platform::millis();
 					espod.currentTrackIndex = 0xFFFFFFFF;
 #endif
 					L0x04::_0x27_PlayStatusNotification(&espod, 0x01, espod.currentTrackIndex != 0xFFFFFFFF ? espod.currentTrackIndex : START_INDEX);
@@ -705,13 +711,16 @@ void initializeA2DPSink()
 	a2dp_sink.set_avrc_rn_volumechange(avrc_rn_volumechange_callback);
 	a2dp_sink.set_avrc_rn_volumechange_completed(avrc_rn_volumechange_completed_callback);
 #endif
-#if !defined(AUDIOKIT) || defined(TRACK_POSITION_FIX)
+#if defined(TRACK_POSITION_FIX)
 	a2dp_sink.set_stream_reader(read_data_stream, false);
+#endif
+#ifdef TRACK_CHANGE_CALLBACK
+	a2dp_sink.set_avrc_rn_track_change_callback(avrc_rn_track_change_callback);
 #endif
 	a2dp_sink.start(A2DP_SINK_NAME);
 
 	ESP_LOGI("SETUP", "a2dp_sink started: %s", A2DP_SINK_NAME);
-	delay(500);
+	platform::delay(500);
 	a2dp_sink.set_discoverability(ESP_BT_GENERAL_DISCOVERABLE);
 }
 
@@ -912,7 +921,7 @@ void avrc_metadata_callback(uint8_t id, const uint8_t *text)
 	}
 }
 
-#if !defined(AUDIOKIT) || defined(TRACK_POSITION_FIX)
+#if defined(TRACK_POSITION_FIX)
 /// @brief Data stream reader callback
 /// @param data Data buffer to pass to the I2S
 /// @param length Length of the data buffer
@@ -927,6 +936,13 @@ void read_data_stream(const uint8_t *data, uint32_t length)
     espod.rawAudioDataBytesReceived += length;
   }
 #endif
+}
+#endif
+
+#ifdef TRACK_CHANGE_CALLBACK
+void avrc_rn_track_change_callback(uint8_t *data)
+{
+	ESP_LOGI("A2DP_CB", "Track change: %08x", data);
 }
 #endif
 
