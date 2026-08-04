@@ -50,7 +50,7 @@ I2SCodecStream i2s(minimalAudioKit);
 BluetoothA2DPSink a2dp_sink(i2s);
 
 #ifdef USE_ALT_SERIAL
-HardwareSerial ipodSerial(1);
+#define USE_SERIAL_1
 
 #ifndef UART1_RX
 #define UART1_RX 19
@@ -61,7 +61,7 @@ HardwareSerial ipodSerial(1);
 #endif
 
 #else // Use main Serial
-HardwareSerial ipodSerial(0);
+#define USE_SERIAL_0
 #endif
 
 #else // Case not using the audiokit, like Sandwich Carrier Board
@@ -80,12 +80,38 @@ HardwareSerial ipodSerial(0);
 #endif
 
 I2SStream i2s;
-HardwareSerial ipodSerial(1);
+
 BluetoothA2DPSink a2dp_sink;
 
 #endif
 
-esPod espod(ipodSerial);
+#if defined(ARDUINO) && !defined(USE_ESP_IDF_SERIAL)
+
+#include "ArduinoUart.h"
+#ifdef USE_SERIAL_0
+HardwareSerial ipodSerial(0);
+#elifdef USE_SERIAL_1
+HardwareSerial ipodSerial(1);
+#else
+#error "Unknown serial"
+#endif
+
+ArduinoUart uart(ipodSerial);
+
+#else
+
+#include "EspIdfUart.h"
+#ifdef USE_SERIAL_0
+EspIdfUart uart(UART_NUM_0);
+#elifdef USE_SERIAL_1
+EspIdfUart uart(UART_NUM_1);
+#else
+#error "Unknown serial"
+#endif
+
+#endif
+
+esPod espod(uart);
 
 #pragma endregion
 
@@ -604,6 +630,7 @@ void initializeSDCard()
 /// @brief Sets up and starts the appropriate Serial interface
 void initializeSerial()
 {
+#if defined(ARDUINO) && !defined(USE_ESP_IDF_SERIAL)
 #ifndef IPOD_SERIAL_BAUDRATE
 #define IPOD_SERIAL_BAUDRATE 19200
 #endif
@@ -613,6 +640,37 @@ void initializeSerial()
 	ipodSerial.setRxBufferSize(1024);
 	ipodSerial.setTxBufferSize(1024);
 	ipodSerial.begin(IPOD_SERIAL_BAUDRATE);
+#else
+    uart_config_t cfg = {
+        .baud_rate = IPOD_SERIAL_BAUDRATE,
+        .data_bits = UART_DATA_8_BITS,
+        .parity    = UART_PARITY_DISABLE,
+        .stop_bits = UART_STOP_BITS_1,
+        .flow_ctrl = UART_HW_FLOWCTRL_DISABLE,
+        .source_clk = UART_SCLK_DEFAULT,
+    };
+
+    ESP_ERROR_CHECK(uart_param_config(UART_NUM_1, &cfg));
+
+    ESP_ERROR_CHECK(uart_set_pin(
+        UART_NUM_1,
+        UART1_TX,
+        UART1_RX,
+        UART_PIN_NO_CHANGE,
+        UART_PIN_NO_CHANGE));
+
+    ESP_ERROR_CHECK(uart_driver_install(
+        UART_NUM_1,
+        1024,
+        1024,
+        0,
+        nullptr,
+        0));
+
+    uart_flush(UART_NUM_1);
+
+    //return ESP_OK;
+#endif
 }
 
 /// @brief Configures the CODEC or DAC and starts the A2DP Sink

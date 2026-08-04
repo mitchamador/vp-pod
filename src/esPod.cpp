@@ -92,9 +92,9 @@ void esPod::_rxTask(void *pvParameters)
         // If the esPod is disabled, flush the RX buffer and wait for 2*RX_TASK_INTERVAL_MS before checking again
         if (esPodInstance->disabled)
         {
-            while (esPodInstance->_targetSerial.available())
+            while (esPodInstance->_uart.available())
             {
-                esPodInstance->_targetSerial.read();
+                esPodInstance->_uart.read();
             }
             vTaskDelay(pdMS_TO_TICKS(2 * RX_TASK_INTERVAL_MS));
             continue;
@@ -102,11 +102,11 @@ void esPod::_rxTask(void *pvParameters)
         else // esPod is enabled, process away !
         {
             // Use of while instead of if()
-            while (esPodInstance->_targetSerial.available())
+            while (esPodInstance->_uart.available())
             {
                 // Timestamping the last activity on RX
                 lastActivity = millis();
-                incByte = esPodInstance->_targetSerial.read();
+                incByte = esPodInstance->_uart.read();
                 // If we are not in the middle of a RX, and we receive a 0xFF 0x55, start sequence, reset expected length and position cursor
                 if (prevByte == 0xFF && incByte == 0x55 && !esPodInstance->_rxIncomplete)
                 {
@@ -465,7 +465,7 @@ void esPod::_sendPacket(const byte *byteArray, uint32_t len)
     }
     tempBuf[3 + len] = esPod::_checksum(byteArray, len);
 
-    _targetSerial.write(tempBuf, finalLength);
+    _uart.write(tempBuf, finalLength);
 }
 
 /// @brief Adds a packet to the transmit queue
@@ -542,8 +542,8 @@ void esPod::_processPacket(const byte *byteArray, uint32_t len)
 #pragma region Constructor, destructor, reset and external PB Contoller attach
 /// @brief Constructor for the esPod class
 /// @param targetSerial (Serial) stream on which the esPod will be communicating
-esPod::esPod(Stream &targetSerial)
-    : _targetSerial(targetSerial)
+esPod::esPod(IUart &uart)
+    : _uart(uart)
 {
     // Create queues with pointer structures to byte arrays
     _cmdQueue = xQueueCreate(CMD_QUEUE_SIZE, sizeof(aapCommand));

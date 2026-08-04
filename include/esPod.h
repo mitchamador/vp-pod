@@ -5,10 +5,13 @@
 #include "L0x04.h"
 #include "esPod_conf.h"
 #include "esPod_utils.h"
+#include "IUart.h"
 
 #ifndef IPOD_TAG
 #define IPOD_TAG "esPod"
 #endif
+
+class IUart;
 
 class esPod
 {
@@ -138,7 +141,7 @@ private:
 #endif
 
     // Serial to the listening device
-    Stream &_targetSerial;
+    IUart &_uart;
 
     // Packet utilities
     static byte _checksum(const byte *byteArray, uint32_t len);
@@ -174,7 +177,7 @@ private:
     playStatusHandler_t *_playStatusHandler = nullptr;
 
 public:
-    esPod(Stream &targetSerial);
+    explicit esPod(IUart &uart);
     ~esPod();
     void resetState();
     void attachPlayControlHandler(playStatusHandler_t playHandler);
