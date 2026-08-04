@@ -113,6 +113,14 @@ struct StatusChangeNotificationTimerCallbackMessage
     byte cmdID;      // Command ID
 };
 
+struct TrackMetadata
+{
+    char title[255];
+    char artist[255];
+    char album[255];
+    uint32_t duration;
+};
+
 #pragma region Local utilities
 // ESP32 is Little-Endian, iPod is Big-Endian
 template <typename T>

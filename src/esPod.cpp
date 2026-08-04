@@ -374,7 +374,7 @@ void esPod::_statusChangeNotificationTimerTask(void *pvParameters)
                 } else if (msg.cmdID == 0x01) {
                     // Playback track changed
                     L0x04::_0x27_PlayStatusNotification(esPodInstance, msg.cmdID,
-                        esPodInstance->currentTrackIndex != 0xFFFFFFFF ? esPodInstance->currentTrackIndex : START_INDEX);
+                        esPodInstance->currentTrackIndex != INVALID_TRACK_NUM ? esPodInstance->currentTrackIndex : START_INDEX);
                 } else if (msg.cmdID == 0x00) {
                     // Playback stopped 
                     L0x04::_0x27_PlayStatusNotification(esPodInstance, msg.cmdID);
@@ -650,6 +650,7 @@ void esPod::resetState()
 {
 
     ESP_LOGW(IPOD_TAG, "esPod resetState called");
+
     // State variables
     extendedInterfaceModeActive = false;
 
@@ -665,13 +666,13 @@ void esPod::resetState()
     repeatStatus = 0x02;
 
     // TrackList variables
-    currentTrackIndex = 0xFFFFFFFF;
+    currentTrackIndex = INVALID_TRACK_NUM;
 #if TOTAL_NUM_TRACKS != 3
     for (uint16_t i = 0; i < TOTAL_NUM_TRACKS; i++)
         trackList[i] = 0;
-    trackListPosition = 0xFFFFFFFF;
+    trackListPosition = INVALID_TRACK_NUM;
 #else
-    trackChangeCompletedTimestamp = 0xFFFFFFFF;
+    trackChangeCompletedTimestamp = INVALID_TIMESTAMP;
 #endif
 
     // Mini metadata
@@ -738,6 +739,64 @@ uint32_t esPod::getPlayPosition() {
 #else
     return playPosition;
 #endif
+}
+
+void esPod::updateMetadata(const TrackMetadata *pending, byte direction)
+{
+    // always update track duration
+    trackDuration = pending->duration;
+
+    // check if metadata changed
+    if (strcmp(pending->title, trackTitle) != 0 || strcmp(pending->album, albumName) != 0 || strcmp(pending->artist, artistName) != 0)
+    {
+        strcpy(trackTitle, pending->title);
+        strcpy(artistName, pending->artist);
+        strcpy(albumName, pending->album);
+
+        byte _trackChangeAckPending = trackChangeAckPending;
+        if (trackChangeAckPending > 0x00)
+        {
+            ESP_LOGD("AVRC_CB",
+                     "Artist+Album+Title+Duration +++ ACK Pending "
+                     "0x%x\n\tPending duration: %d",
+                     espod.trackChangeAckPending, platform::millis() - espod.trackChangeTimestamp);
+            // espod.L0x04_0x01_iPodAck(iPodAck_OK, espod.trackChangeAckPending);
+            if (trackChangeAckPending == 0x11)
+            {
+                L0x03::_0x00_iPodAck(this, iPodAck_OK, trackChangeAckPending);
+            }
+            else
+            {
+                L0x04::_0x01_iPodAck(this, iPodAck_OK, trackChangeAckPending);
+            }
+            trackChangeAckPending = 0x00;
+            ESP_LOGD("AVRC_CB", "trackChangeAckPending reset to 0x00");
+        }
+
+        ESP_LOGD("AVRC_CB", "Artist+Album+Title+Duration : True -> False");
+        // Inform the car
+        if (playStatusNotificationState == NOTIF_ON)
+        {
+#if TOTAL_NUM_TRACKS == 3
+            // force Audi MMI to redraw track's information
+            if (_trackChangeAckPending == 0x00)
+            {
+                trackChangeTimestamp = platform::millis();
+                L0x04::_0x27_PlayStatusNotification(this, 0x01, direction == PB_CMD_PREV ? 0 : TOTAL_NUM_TRACKS - 1);
+            }
+
+            uint32_t trackNotificationDelay = platform::millis() - trackChangeTimestamp;
+            if (trackNotificationDelay > 0 && trackNotificationDelay < TRACK_CHANGE_NOTIFICATION_TIMEOUT)
+            {
+                vTaskDelay(pdMS_TO_TICKS(TRACK_CHANGE_NOTIFICATION_TIMEOUT - trackNotificationDelay));
+            }
+
+            trackChangeCompletedTimestamp = platform::millis();
+            currentTrackIndex = INVALID_TRACK_NUM;
+#endif
+            L0x04::_0x27_PlayStatusNotification(this, 0x01, currentTrackIndex != INVALID_TRACK_NUM ? currentTrackIndex : START_INDEX);
+        }
+    }
 }
 
 #pragma endregion

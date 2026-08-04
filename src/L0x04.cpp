@@ -218,7 +218,7 @@ void L0x04::processLingo(esPod *esp, const byte *byteArray, uint32_t len)
         case L0x04_GetCurrentPlayingTrackIndex: // Get the uint32 index of the currently playing song
         {
             ESP_LOGI(IPOD_TAG, "CMD 0x%04x GetCurrentPlayingTrackIndex", cmdID);
-            L0x04::_0x1F_ReturnCurrentPlayingTrackIndex(esp, esp->currentTrackIndex != 0xFFFFFFFF ? esp->currentTrackIndex : START_INDEX);
+            L0x04::_0x1F_ReturnCurrentPlayingTrackIndex(esp, esp->currentTrackIndex != INVALID_TRACK_NUM ? esp->currentTrackIndex : START_INDEX);
         }
         break;
 
@@ -226,16 +226,21 @@ void L0x04::processLingo(esPod *esp, const byte *byteArray, uint32_t len)
         {
             tempTrackIndex = swap_endian<uint32_t>(*((uint32_t *)&byteArray[2]));
             ESP_LOGI(IPOD_TAG, "CMD 0x%04x GetIndexedPlayingTrackTitle for index %d", cmdID, tempTrackIndex);
+
 #if TOTAL_NUM_TRACKS == 3
-            uint32_t trackChangeCompletedTimeout = platform::millis() - esp->trackChangeCompletedTimestamp;
-            if (trackChangeCompletedTimeout > 0 && trackChangeCompletedTimeout < FORCED_TRACK_CHANGE_TIMEOUT)
+            uint32_t current = platform::millis();
+            uint32_t trackChangeCompletedTimeout = current - esp->trackChangeCompletedTimestamp;
+            uint32_t trackChangeTimeout = current - esp->trackChangeTimestamp;
+            if (trackChangeCompletedTimeout > 0 && trackChangeCompletedTimeout < FORCED_TRACK_CHANGE_TIMEOUT
+                || trackChangeTimeout > 0 && trackChangeTimeout < TRACK_CHANGE_NOTIFICATION_TIMEOUT)
             {
                 // returning current playing track title
                 L0x04::_0x21_ReturnIndexedPlayingTrackTitle(esp, esp->trackTitle);
-                break;
             }
-
-            L0x04::_0x21_ReturnIndexedPlayingTrackTitle(esp, tempTrackIndex == 0 ? esp->fixedPrevTrackTitle : (tempTrackIndex == 2 ? esp->fixedNextTrackTitle : (tempTrackIndex > 2 ? esp->fixedEmptyTrackTitle : esp->trackTitle)));
+            else
+            {
+                L0x04::_0x21_ReturnIndexedPlayingTrackTitle(esp, tempTrackIndex == 0 ? esp->fixedPrevTrackTitle : (tempTrackIndex == 2 ? esp->fixedNextTrackTitle : (tempTrackIndex > 2 ? esp->fixedEmptyTrackTitle : esp->trackTitle)));
+            }
 #else
             if (tempTrackIndex == esp->prevTrackIndex)
             {
@@ -328,7 +333,7 @@ void L0x04::processLingo(esPod *esp, const byte *byteArray, uint32_t len)
             }
 
 #if TOTAL_NUM_TRACKS == 3
-            if (esp->currentTrackIndex == 0xFFFFFFFF)
+            if (esp->currentTrackIndex == INVALID_TRACK_NUM)
                 esp->currentTrackIndex = START_INDEX;
 
             // if (tempTrackIndex != 1)
