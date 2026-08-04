@@ -74,7 +74,7 @@ void L0x03::processLingo(esPod *esp, const byte *byteArray, uint32_t len)
     case L0x03_GetPlayStatus:
     {
         ESP_LOGI(IPOD_TAG, "CMD: 0x%02x GetPlayStatus", cmdID);
-        L0x03::_0x10_RetPlayStatus(esp, esp->playStatus, esp->currentTrackIndex, esp->trackDuration, esp->playPosition);
+        L0x03::_0x10_RetPlayStatus(esp, esp->playStatus, esp->currentTrackIndex, esp->trackDuration, esp->getPlayPosition());
     }
     break;
 
@@ -90,17 +90,16 @@ void L0x03::processLingo(esPod *esp, const byte *byteArray, uint32_t len)
                 esp->_playStatusHandler(A2DP_PLAY); // Send play to the a2dp
             }
         }
+#if TOTAL_NUM_TRACKS == 3
+        if (tempTrackIndex == (esp->currentTrackIndex + TOTAL_NUM_TRACKS - 1) % TOTAL_NUM_TRACKS) // Desired trackIndex is the left entry
+        {
+            // Cursor operations for PREV
+#else
         if (tempTrackIndex == esp->trackList[(esp->trackListPosition + TOTAL_NUM_TRACKS - 1) % TOTAL_NUM_TRACKS]) // Desired trackIndex is the left entry
         {
-            // This is only for when the system requires the data of the previously active track
-            esp->prevTrackIndex = esp->currentTrackIndex;
-            strcpy(esp->prevAlbumName, esp->albumName);
-            strcpy(esp->prevArtistName, esp->artistName);
-            strcpy(esp->prevTrackTitle, esp->trackTitle);
-            esp->prevTrackDuration = esp->trackDuration;
-
             // Cursor operations for PREV
             esp->trackListPosition = (esp->trackListPosition + TOTAL_NUM_TRACKS - 1) % TOTAL_NUM_TRACKS; // Shift esp->trackListPosition one to the right
+#endif
             esp->currentTrackIndex = tempTrackIndex;
 
             // Engage the pending ACK for expected metadata
@@ -124,16 +123,11 @@ void L0x03::processLingo(esPod *esp, const byte *byteArray, uint32_t len)
         }
         else // If it is not the previous or the current track, it automatically becomes a next track
         {
-            // This is only for when the system requires the data of the previously active track
-            esp->prevTrackIndex = esp->currentTrackIndex;
-            strcpy(esp->prevAlbumName, esp->albumName);
-            strcpy(esp->prevArtistName, esp->artistName);
-            strcpy(esp->prevTrackTitle, esp->trackTitle);
-            esp->prevTrackDuration = esp->trackDuration;
-
             // Cursor operations for NEXT
+#if TOTAL_NUM_TRACKS != 3
             esp->trackListPosition = (esp->trackListPosition + 1) % TOTAL_NUM_TRACKS;
             esp->trackList[esp->trackListPosition] = tempTrackIndex;
+#endif
             esp->currentTrackIndex = tempTrackIndex;
 
             // Engage the pending ACK for expected metadata
@@ -155,62 +149,34 @@ void L0x03::processLingo(esPod *esp, const byte *byteArray, uint32_t len)
         switch (byteArray[1]) // Switch on the type of track info requested (careful with overloads)
         {
         case 0x00: // General track Capabilities and Information
-            ESP_LOGI(IPOD_TAG, "CMD 0x%02x GetIndexedPlayingTrackInfo 0x%02x for index %d (previous %d) : Duration", cmdID, byteArray[1], tempTrackIndex, esp->prevTrackIndex);
-            if (tempTrackIndex == esp->prevTrackIndex)
-            {
-                L0x03::_0x13_RetIndexedPlayingTrackInfo(esp, (uint32_t)esp->prevTrackDuration);
-            }
-            else
-            {
-                L0x03::_0x13_RetIndexedPlayingTrackInfo(esp, (uint32_t)esp->trackDuration);
-            }
+            ESP_LOGI(IPOD_TAG, "CMD 0x%02x GetIndexedPlayingTrackInfo 0x%02x for index %d : Duration", cmdID, byteArray[1], tempTrackIndex);
+            L0x03::_0x13_RetIndexedPlayingTrackInfo(esp, (uint32_t)esp->trackDuration);
             break;
 
         case 0x02: // Artist Name
-            ESP_LOGI(IPOD_TAG, "CMD 0x%02x GetIndexedPlayingTrackInfo 0x%02x for index %d (previous %d) : Artist", cmdID, byteArray[1], tempTrackIndex, esp->prevTrackIndex);
-            if (tempTrackIndex == esp->prevTrackIndex)
-            {
-                L0x03::_0x13_RetIndexedPlayingTrackInfo(esp, byteArray[1], esp->prevArtistName);
-            }
-            else
-            {
-                L0x03::_0x13_RetIndexedPlayingTrackInfo(esp, byteArray[1], esp->artistName);
-            }
+            ESP_LOGI(IPOD_TAG, "CMD 0x%02x GetIndexedPlayingTrackInfo 0x%02x for index %d : Artist", cmdID, byteArray[1], tempTrackIndex);
+            L0x03::_0x13_RetIndexedPlayingTrackInfo(esp, byteArray[1], esp->artistName);
             break;
 
         case 0x03: // Album Name
-            ESP_LOGI(IPOD_TAG, "CMD 0x%02x GetIndexedPlayingTrackInfo 0x%02x for index %d (previous %d) : Album", cmdID, byteArray[1], tempTrackIndex, esp->prevTrackIndex);
-            if (tempTrackIndex == esp->prevTrackIndex)
-            {
-                L0x03::_0x13_RetIndexedPlayingTrackInfo(esp, byteArray[1], esp->prevAlbumName);
-            }
-            else
-            {
-                L0x03::_0x13_RetIndexedPlayingTrackInfo(esp, byteArray[1], esp->albumName);
-            }
+            ESP_LOGI(IPOD_TAG, "CMD 0x%02x GetIndexedPlayingTrackInfo 0x%02x for index %d : Album", cmdID, byteArray[1], tempTrackIndex);
+            L0x03::_0x13_RetIndexedPlayingTrackInfo(esp, byteArray[1], esp->albumName);
             break;
 
         case 0x04: // Track Genre
-            ESP_LOGI(IPOD_TAG, "CMD 0x%02x GetIndexedPlayingTrackInfo 0x%02x for index %d (previous %d) : Genre", cmdID, byteArray[1], tempTrackIndex, esp->prevTrackIndex);
+            ESP_LOGI(IPOD_TAG, "CMD 0x%02x GetIndexedPlayingTrackInfo 0x%02x for index %d : Genre", cmdID, byteArray[1], tempTrackIndex);
             L0x03::_0x13_RetIndexedPlayingTrackInfo(esp, byteArray[1], esp->trackGenre);
             break;
         case 0x05: // Track Title
-            ESP_LOGI(IPOD_TAG, "CMD 0x%02x GetIndexedPlayingTrackInfo 0x%02x for index %d (previous %d) : Title", cmdID, byteArray[1], tempTrackIndex, esp->prevTrackIndex);
-            if (tempTrackIndex == esp->prevTrackIndex)
-            {
-                L0x03::_0x13_RetIndexedPlayingTrackInfo(esp, byteArray[1], esp->prevTrackTitle);
-            }
-            else
-            {
-                L0x03::_0x13_RetIndexedPlayingTrackInfo(esp, byteArray[1], esp->trackTitle);
-            }
+            ESP_LOGI(IPOD_TAG, "CMD 0x%02x GetIndexedPlayingTrackInfo 0x%02x for index %d : Title", cmdID, byteArray[1], tempTrackIndex);
+            L0x03::_0x13_RetIndexedPlayingTrackInfo(esp, byteArray[1], esp->trackTitle);
             break;
         case 0x06: // Track Composer
-            ESP_LOGI(IPOD_TAG, "CMD 0x%042 GetIndexedPlayingTrackInfo 0x%02x for index %d (previous %d) : Composer", cmdID, byteArray[1], tempTrackIndex, esp->prevTrackIndex);
+            ESP_LOGI(IPOD_TAG, "CMD 0x%042 GetIndexedPlayingTrackInfo 0x%02x for index %d : Composer", cmdID, byteArray[1], tempTrackIndex);
             L0x03::_0x13_RetIndexedPlayingTrackInfo(esp, byteArray[1], esp->composer);
             break;
         default: // In case the request is beyond the track capabilities
-            ESP_LOGW(IPOD_TAG, "CMD 0x%02x GetIndexedPlayingTrackInfo 0x%02x for index %d (previous %d) : Type not recognised!", cmdID, byteArray[1], tempTrackIndex, esp->prevTrackIndex);
+            ESP_LOGW(IPOD_TAG, "CMD 0x%02x GetIndexedPlayingTrackInfo 0x%02x for index %d : Type not recognised!", cmdID, byteArray[1], tempTrackIndex);
             L0x03::_0x00_iPodAck(esp, iPodAck_BadParam, cmdID);
             break;
         }

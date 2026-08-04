@@ -120,6 +120,7 @@ void L0x00::processLingo(esPod *esp, const byte *byteArray, uint32_t len)
         // There might be some trickery triggered there with further options enquiries per Lingo
         L0x00::_0x25_RetiPodOptions(esp, iPodOptions);
     }
+    break;
 
     case L0x00_RetAccessoryInfo: // Mini returns info after L0x00::_0x27
     {
@@ -153,6 +154,25 @@ void L0x00::processLingo(esPod *esp, const byte *byteArray, uint32_t len)
         default:
             L0x00::_0x02_iPodAck(esp, iPodAck_OK, cmdID);
             break;
+        }
+    }
+    break;
+
+    case L0x00_GetiPodPreferences: //
+    {
+        switch (byteArray[1]) // Ping-pong the next request based on the current response
+        {
+            case 0x03:
+                /* The only information really supported is 0x03, Line-out usage.
+                * All others are video related
+                */
+                ESP_LOGI(IPOD_TAG, "CMD: 0x%02x GetiPodPreferences: 0x%02x = 0x%02x", cmdID, byteArray[1], 0x01);
+                L0x00::_0x2A_RetiPodPreferences(esp, 0x01);
+                break;
+            default:
+                ESP_LOGI(IPOD_TAG, "CMD: 0x%02x GetiPodPreferences: 0x%02x = 0x%02x", cmdID, byteArray[1], 0x00);
+                L0x00::_0x2A_RetiPodPreferences(esp, 0x00);
+                break;
         }
     }
     break;
@@ -238,12 +258,17 @@ void L0x00::_0x04_ReturnExtendedInterfaceMode(esPod *esp, byte extendedModeByte)
 /// @param esp Pointer to the esPod instance
 void L0x00::_0x08_ReturniPodName(esPod *esp)
 {
-    ESP_LOGI(IPOD_TAG, "Name: %s", esp->_name);
+#ifdef USE_PEER_NAME
+    const char *espName = esp->_peer_name;    
+#else
+    const char *espName = esp->_name;    
+#endif
+    ESP_LOGI(IPOD_TAG, "Name: %s", espName);
     byte txPacket[255] = {// Prealloc to len = FF
                           0x00,
                           0x08};
-    strcpy((char *)&txPacket[2], esp->_name);
-    esp->_queuePacket(txPacket, 3 + strlen(esp->_name));
+    strcpy((char *)&txPacket[2], espName);
+    esp->_queuePacket(txPacket, 3 + strlen(espName));
 }
 
 /// @brief Returns the iPod Software Version
@@ -321,6 +346,17 @@ void L0x00::_0x25_RetiPodOptions(esPod *esp, uint64_t optBitField)
         0x00, 0x25,
         0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
     *((uint64_t *)&txPacket[2]) = swap_endian<uint64_t>(optBitField); // Hehhhh not sure about that one
+    esp->_queuePacket(txPacket, sizeof(txPacket));
+}
+
+/// @brief Return iPod Options. In this case not much.
+/// @param esp Pointer to the esPod instance
+void L0x00::_0x2A_RetiPodPreferences(esPod *esp, byte option)
+{
+    ESP_LOGI(IPOD_TAG, "Returning information about the current state of the iPod");
+    byte txPacket[] = {
+        0x00, 0x2A,
+        0x03, option};
     esp->_queuePacket(txPacket, sizeof(txPacket));
 }
 

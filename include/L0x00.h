@@ -15,6 +15,7 @@ class esPod;
 #define L0x00_IdentifyDeviceLingoes 0x13
 #define L0x00_GetiPodOptions 0x24
 #define L0x00_RetAccessoryInfo 0x28
+#define L0x00_GetiPodPreferences 0x29
 
 class L0x00
 {
@@ -40,7 +41,7 @@ public:
     // static void _0x23_NotifyiPodStateChange(esPod *esp, byte stateChg);
     static void _0x25_RetiPodOptions(esPod *esp, uint64_t optBitField);
     static void _0x27_GetAccessoryInfo(esPod *esp, byte desiredInfo);
-    // static void _0x2A_RetiPodPreferences(esPod *esp);
+    static void _0x2A_RetiPodPreferences(esPod *esp, byte option);
     // static void _0x36_RetUIMode(esPod *esp);
     // static void _0x3A_AckFIDTokenValues(esPod *esp);
     // static void _0x3C_IDPSStatus(esPod *esp);

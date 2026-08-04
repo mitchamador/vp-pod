@@ -108,6 +108,11 @@ struct TimerCallbackMessage
     byte targetLingo; // Targeted Lingo
 };
 
+struct StatusChangeNotificationTimerCallbackMessage
+{
+    byte cmdID;      // Command ID
+};
+
 #pragma region Local utilities
 // ESP32 is Little-Endian, iPod is Big-Endian
 template <typename T>

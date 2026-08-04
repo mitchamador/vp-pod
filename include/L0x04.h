@@ -3,6 +3,8 @@
 #include "esPod_utils.h"
 class esPod;
 
+#define L0x04_GetCurrentPlayingTrackChapterInfo 0x02
+#define L0x04_GetAudioBookSpeed 0x09
 #define L0x04_GetIndexedPlayingTrackInfo 0x0C
 #define L0x04_RequestProtocolVersion 0x12
 #define L0x04_ResetDBSelection 0x16
@@ -35,10 +37,10 @@ public:
     // Lingo 0x04 Handlers
     static void _0x01_iPodAck(esPod *esp, IPOD_ACK_CODE ackCode, byte cmdID);
     static void _0x01_iPodAck(esPod *esp, IPOD_ACK_CODE ackCode, byte cmdID, uint32_t numField);
-    // static void _0x03_ReturnCurrentPlayingTrackChapterInfo(esPod *esp);
+    static void _0x03_ReturnCurrentPlayingTrackChapterInfo(esPod *esp);
     // static void _0x06_ReturnCurrentPlayingTrackChapterPlayStatus(esPod *esp);
     // static void _0x08_ReturnCurrentPlayingTrackChapterName(esPod *esp);
-    // static void _0x0A_ReturnAudiobookSpeed(esPod *esp);
+    static void _0x0A_ReturnAudiobookSpeed(esPod *esp);
     static void _0x0D_ReturnIndexedPlayingTrackInfo(esPod *esp, byte trackInfoType, char *trackInfoChars);
     static void _0x0D_ReturnIndexedPlayingTrackInfo(esPod *esp, uint32_t trackDuration_ms);
     static void _0x0D_ReturnIndexedPlayingTrackInfo(esPod *esp, byte trackInfoType, uint16_t releaseYear);

@@ -3,21 +3,10 @@
 #include "AudioTools.h"
 #include "BluetoothA2DPSink.h"
 
+#include "esPod.h"
+
 #ifdef ZERO_VOLUME_FIX
 #include "ArduinoNvs.h"
-#endif
-
-#ifndef NO_ESPOD
-#define ESPOD_ENABLED
-#endif
-
-#ifdef ESPOD_ENABLED
-#include "esPod.h"
-#else
-// A2DP instance name
-#ifndef A2DP_SINK_NAME
-#define A2DP_SINK_NAME "espiPod"
-#endif
 #endif
 
 #pragma region Board IO Macros
@@ -94,19 +83,9 @@ I2SStream i2s;
 HardwareSerial ipodSerial(1);
 BluetoothA2DPSink a2dp_sink;
 
-/// @brief Data stream reader callback
-/// @param data Data buffer to pass to the I2S
-/// @param length Length of the data buffer
-void read_data_stream(const uint8_t *data, uint32_t length)
-{
-	i2s.write(data, length);
-}
-
 #endif
 
-#ifdef ESPOD_ENABLED
 esPod espod(ipodSerial);
-#endif
 
 #pragma endregion
 
@@ -147,6 +126,10 @@ void avrc_rn_volumechange_callback(int volume);
 void avrc_rn_volumechange_completed_callback(int volume);
 #endif
 void playStatusHandler(byte playCommand);
+#if !defined(AUDIOKIT) || defined(TRACK_POSITION_FIX)
+void read_data_stream(const uint8_t *data, uint32_t length);
+#endif
+
 #pragma endregion
 
 typedef enum {
@@ -234,9 +217,7 @@ void setup()
 	digitalWrite(UART1_RST, HIGH);
 #endif
 	initializeSerial();
-#ifdef ESPOD_ENABLED
 	espod.attachPlayControlHandler(playStatusHandler);
-#endif
 #ifdef ZERO_VOLUME_FIX
 	NVS.begin();
 #endif
@@ -281,7 +262,12 @@ void loop()
 	{
 		delay(50);
 		peer_state = PEER_CONNECTED;
+#ifdef USE_PEER_NAME
+		espod._peer_name = a2dp_sink.get_peer_name();
+		ESP_LOGI("MAIN", "Peer connected: %s", espod._peer_name);
+#else
 		ESP_LOGI("MAIN", "Peer connected: %s", a2dp_sink.get_peer_name());
+#endif
 	}
 	else if (peer_state == PEER_CONNECTED && a2dp_sink.get_connection_state() == ESP_A2D_CONNECTION_STATE_DISCONNECTED)
 	{
@@ -302,6 +288,34 @@ struct avrcMetadata
 QueueHandle_t avrcMetadataQueue;
 TaskHandle_t processAVRCTaskHandle;
 
+void filterPayload(char *output, const char *input) {
+    size_t in_idx = 0, out_idx = 0, max_len = 255;
+    while (input[in_idx] != '\0' && out_idx < max_len - 1) {
+        unsigned char c = input[in_idx];
+        
+        // Check for UTF-8 byte length based on leading bits
+        int char_len = 1;
+        if (c >= 0xF0) {
+            char_len = 4; // 4-byte characters (most emojis live here)
+        } else if (c >= 0xE0) {
+            char_len = 3; // 3-byte characters (some symbols/emojis)
+        } else if (c >= 0xC0) {
+            char_len = 2; // 2-byte characters
+        }
+
+        // If it's a 4-byte or high 3-byte sequence, skip it (treat as emoji/unsupported symbol)
+        if (char_len >= 4 || (char_len == 3 && c >= 0xEF)) {
+            in_idx += char_len;
+        } else {
+            // Copy valid standard bytes
+            for (int i = 0; i < char_len && input[in_idx + i] != '\0'; i++) {
+                output[out_idx++] = input[in_idx++];
+            }
+        }
+    }
+    output[out_idx] = '\0';
+}
+
 /// @brief Low priority task to process a queue of received metadata
 /// @param pvParameters
 static void processAVRCTask(void *pvParameters)
@@ -316,6 +330,8 @@ static void processAVRCTask(void *pvParameters)
 	bool artistNameUpdated = false;
 	bool trackTitleUpdated = false;
 	bool trackDurationUpdated = false;
+	uint32_t oldTrackDuration = 0;
+	uint32_t trackNum = 0xFFFFFFFF, prevTrackNum = 0xFFFFFFFF;
 
 #ifdef STACK_HIGH_WATERMARK_LOG
 	UBaseType_t uxHighWaterMark;
@@ -341,10 +357,13 @@ static void processAVRCTask(void *pvParameters)
 			// Start processing
 			switch (incMetadata.id)
 			{
+			case ESP_AVRC_MD_ATTR_TRACK_NUM:
+				trackNum = String((char *)incMetadata.payload).toInt();
+				if (prevTrackNum == 0xFFFFFFFF)
+					prevTrackNum = trackNum;
+				break;
 			case ESP_AVRC_MD_ATTR_ALBUM:
-				strcpy(incAlbumName,
-					   (char *)incMetadata.payload); // Buffer the incoming album string
-#ifdef ESPOD_ENABLED
+				filterPayload(incAlbumName,(char *)incMetadata.payload); // Buffer the incoming album string
 				if (espod.trackChangeAckPending > 0x00)
 				{ // There is a pending metadata update
 					if (!albumNameUpdated)
@@ -363,7 +382,6 @@ static void processAVRCTask(void *pvParameters)
 				  // passive track change from avrc target
 					if (strcmp(incAlbumName, espod.albumName) != 0)
 					{ // Different incoming metadata
-						strcpy(espod.prevAlbumName, espod.albumName);
 						strcpy(espod.albumName, incAlbumName);
 						albumNameUpdated = true;
 						ESP_LOGD("AVRC_CB", "Album rxed, NO ACK pending, albumNameUpdated to %s", espod.albumName);
@@ -373,13 +391,10 @@ static void processAVRCTask(void *pvParameters)
 						ESP_LOGD("AVRC_CB", "Album rxed, NO ACK pending, already updated to %s", espod.albumName);
 					}
 				}
-#endif
 				break;
 
 			case ESP_AVRC_MD_ATTR_ARTIST:
-				strcpy(incArtistName,
-					   (char *)incMetadata.payload); // Buffer the incoming artist string
-#ifdef ESPOD_ENABLED
+				filterPayload(incArtistName, (char *)incMetadata.payload); // Buffer the incoming artist string
 				if (espod.trackChangeAckPending > 0x00)
 				{ // There is a pending metadata update
 					if (!artistNameUpdated)
@@ -399,7 +414,6 @@ static void processAVRCTask(void *pvParameters)
 				  // passive track change from avrc target
 					if (strcmp(incArtistName, espod.artistName) != 0)
 					{ // Different incoming metadata
-						strcpy(espod.prevArtistName, espod.artistName);
 						strcpy(espod.artistName, incArtistName);
 						artistNameUpdated = true;
 						ESP_LOGD("AVRC_CB", "Artist rxed, NO ACK pending, artistNameUpdated to %s", espod.artistName);
@@ -409,16 +423,17 @@ static void processAVRCTask(void *pvParameters)
 						ESP_LOGD("AVRC_CB", "Artist rxed, NO ACK pending, already updated to %s", espod.artistName);
 					}
 				}
-#endif
 				break;
 
 			case ESP_AVRC_MD_ATTR_TITLE: // Title change triggers the NEXT track
 										 // assumption if unexpected. It is too
 										 // intensive to try to do NEXT/PREV
 										 // guesswork
-				strcpy(incTrackTitle,
-					   (char *)incMetadata.payload); // Buffer the incoming track title
-#ifdef ESPOD_ENABLED
+				filterPayload(incTrackTitle, (char *)incMetadata.payload); // Buffer the incoming track title
+#ifdef TRACK_POSITION_FIX
+				// Reset the byte counter immediately for the new track
+				espod.rawAudioDataBytesReceived = 0;
+#endif
 				if (espod.trackChangeAckPending > 0x00)
 				{ // There is a pending metadata update
 					if (!trackTitleUpdated)
@@ -437,14 +452,16 @@ static void processAVRCTask(void *pvParameters)
 				{ // There is no pending track change from iPod : active or
 				  // passive track change from avrc target
 					if (strcmp(incTrackTitle, espod.trackTitle) != 0)
-					{ // Different from current track Title -> Systematic NEXT
+					{  // Different from current track Title -> Systematic NEXT
 						// Assume it is Next, perform cursor operations
-						espod.trackListPosition = (espod.trackListPosition + 1) % TOTAL_NUM_TRACKS;
-						espod.prevTrackIndex = espod.currentTrackIndex;
-						espod.currentTrackIndex = (espod.currentTrackIndex + 1) % TOTAL_NUM_TRACKS;
-						espod.trackList[espod.trackListPosition] = (espod.currentTrackIndex);
-						// Copy new title and flag that data has been updated
-						strcpy(espod.prevTrackTitle, espod.trackTitle);
+#if TOTAL_NUM_TRACKS != 3
+						if (espod.trackListPosition != 0xFFFFFFFF && espod.currentTrackIndex != 0xFFFFFFFF)
+						{
+							espod.trackListPosition = (espod.trackListPosition + 1) % TOTAL_NUM_TRACKS;
+							espod.currentTrackIndex = (espod.currentTrackIndex + 1) % TOTAL_NUM_TRACKS;
+							espod.trackList[espod.trackListPosition] = (espod.currentTrackIndex);
+						}
+#endif
 						strcpy(espod.trackTitle, incTrackTitle);
 						trackTitleUpdated = true;
 						ESP_LOGD("AVRC_CB",
@@ -457,12 +474,12 @@ static void processAVRCTask(void *pvParameters)
 						ESP_LOGD("AVRC_CB", "Title rxed, NO ACK pending, same name : %s", espod.trackTitle);
 					}
 				}
-#endif
 				break;
 
 			case ESP_AVRC_MD_ATTR_PLAYING_TIME:
 				incTrackDuration = String((char *)incMetadata.payload).toInt();
-#ifdef ESPOD_ENABLED
+				//if (incTrackDuration == 0) break;
+				oldTrackDuration = espod.trackDuration;				
 				if (espod.trackChangeAckPending > 0x00)
 				{ // There is a pending metadata update
 					if (!trackDurationUpdated)
@@ -494,17 +511,22 @@ static void processAVRCTask(void *pvParameters)
 								 espod.trackDuration);
 					}
 				}
-#endif
 				break;
 			}
 
+			// End Processing, deallocate memory
+			delete[] incMetadata.payload;
+			incMetadata.payload = nullptr;
+		}
+		else
+		{
 			// Check if it is time to send a notification
 			if (albumNameUpdated && artistNameUpdated && trackTitleUpdated && trackDurationUpdated)
 			{
 				// If all fields have received at least one update and the
 				// trackChangeAckPending is still hanging. The failsafe for this one is
 				// in the espod _processTask
-#ifdef ESPOD_ENABLED
+				byte _trackChangeAckPending = espod.trackChangeAckPending;
 				if (espod.trackChangeAckPending > 0x00)
 				{
 					ESP_LOGD("AVRC_CB",
@@ -523,25 +545,36 @@ static void processAVRCTask(void *pvParameters)
 					espod.trackChangeAckPending = 0x00;
 					ESP_LOGD("AVRC_CB", "trackChangeAckPending reset to 0x00");
 				}
-#endif
 				albumNameUpdated = false;
 				artistNameUpdated = false;
 				trackTitleUpdated = false;
 				trackDurationUpdated = false;
+
 				ESP_LOGD("AVRC_CB", "Artist+Album+Title+Duration : True -> False");
-#ifdef ESPOD_ENABLED
 				// Inform the car
 				if (espod.playStatusNotificationState == NOTIF_ON)
 				{
-					// espod.L0x04_0x27_PlayStatusNotification(0x01, espod.currentTrackIndex);
-					L0x04::_0x27_PlayStatusNotification(&espod, 0x01, espod.currentTrackIndex);
-				}
-#endif
-			}
+#if TOTAL_NUM_TRACKS == 3
+					// force Audi MMI to redraw track's information
+					if (_trackChangeAckPending == 0x00)
+					{
+						espod.trackChangeTimestamp = millis();
+						L0x04::_0x27_PlayStatusNotification(&espod, 0x01, trackNum < prevTrackNum ? 0 : TOTAL_NUM_TRACKS - 1);
+					}
 
-			// End Processing, deallocate memory
-			delete[] incMetadata.payload;
-			incMetadata.payload = nullptr;
+					uint32_t trackNotificationDelay = millis() - espod.trackChangeTimestamp;
+					if (trackNotificationDelay > 0 && trackNotificationDelay < TRACK_CHANGE_NOTIFICATION_TIMEOUT)
+					{
+						vTaskDelay(pdMS_TO_TICKS(TRACK_CHANGE_NOTIFICATION_TIMEOUT - trackNotificationDelay));
+					}
+
+					espod.trackChangeCompletedTimestamp = millis();
+					espod.currentTrackIndex = 0xFFFFFFFF;
+#endif
+					L0x04::_0x27_PlayStatusNotification(&espod, 0x01, espod.currentTrackIndex != 0xFFFFFFFF ? espod.currentTrackIndex : START_INDEX);
+				}
+				prevTrackNum = trackNum;
+			}
 		}
 		vTaskDelay(pdMS_TO_TICKS(AVRC_INTERVAL_MS));
 	}
@@ -592,7 +625,6 @@ void initializeA2DPSink()
 	cfg.copyFrom(info);
 	i2s.begin(cfg);
 #else
-	a2dp_sink.set_stream_reader(read_data_stream, false);
 	auto cfg = i2s.defaultConfig(TX_MODE);
 	cfg.pin_ws = 25;   // Default is 15
 	cfg.pin_data = 26; // Default is 22
@@ -608,16 +640,21 @@ void initializeA2DPSink()
 	a2dp_sink.set_avrc_connection_state_callback(avrc_connection_state_callback);
 	a2dp_sink.set_avrc_metadata_callback(avrc_metadata_callback);
 	a2dp_sink.set_avrc_metadata_attribute_mask(ESP_AVRC_MD_ATTR_TITLE | ESP_AVRC_MD_ATTR_ARTIST |
-											   ESP_AVRC_MD_ATTR_ALBUM | ESP_AVRC_MD_ATTR_PLAYING_TIME);
+											   ESP_AVRC_MD_ATTR_ALBUM | ESP_AVRC_MD_ATTR_PLAYING_TIME |
+												ESP_AVRC_MD_ATTR_TRACK_NUM | ESP_AVRC_MD_ATTR_NUM_TRACKS);
 	a2dp_sink.set_avrc_rn_play_pos_callback(avrc_rn_play_pos_callback, 1);
 #ifdef ZERO_VOLUME_FIX
 	a2dp_sink.set_avrc_rn_volumechange(avrc_rn_volumechange_callback);
 	a2dp_sink.set_avrc_rn_volumechange_completed(avrc_rn_volumechange_completed_callback);
 #endif
+#if !defined(AUDIOKIT) || defined(TRACK_POSITION_FIX)
+	a2dp_sink.set_stream_reader(read_data_stream, false);
+#endif
 	a2dp_sink.start(A2DP_SINK_NAME);
 
 	ESP_LOGI("SETUP", "a2dp_sink started: %s", A2DP_SINK_NAME);
-	delay(5);
+	delay(500);
+	a2dp_sink.set_discoverability(ESP_BT_GENERAL_DISCOVERABLE);
 }
 
 /// @brief Initializes the AVRC metadata queue, and attempts to start the
@@ -662,9 +699,7 @@ void connectionStateChanged(esp_a2d_connection_state_t state, void *ptr)
 	case ESP_A2D_CONNECTION_STATE_CONNECTED:
 		connection_state = state;
 		ESP_LOGI("A2DP_CB", "ESP_A2D_CONNECTION_STATE_CONNECTED, espod enabled");
-#ifdef ESPOD_ENABLED
 		espod.disabled = false;
-#endif
 #ifdef LED_BUILTIN
 		digitalWrite(LED_BUILTIN, INVERT_LED_LOGIC(HIGH));
 #endif
@@ -674,10 +709,8 @@ void connectionStateChanged(esp_a2d_connection_state_t state, void *ptr)
 		break;
 	case ESP_A2D_CONNECTION_STATE_DISCONNECTED:
 		ESP_LOGI("A2DP_CB", "ESP_A2D_CONNECTION_STATE_DISCONNECTED, espod disabled");
-#ifdef ESPOD_ENABLED
 		espod.resetState();
 		espod.disabled = true;
-#endif
 #ifdef LED_BUILTIN
 		digitalWrite(LED_BUILTIN, INVERT_LED_LOGIC(LOW));
 #endif
@@ -710,28 +743,34 @@ void audioStateChanged(esp_a2d_audio_state_t state, void *ptr)
 			a2dp_sink.set_volume(nvs_get_volume());
 		}
 #endif
-#ifdef ESPOD_ENABLED
 		espod.playStatus = PB_STATE_PLAYING;
-#endif
 		ESP_LOGI("A2DP_CB", "ESP_A2D_AUDIO_STATE_STARTED, espod.playStatus = PB_STATE_PLAYING");
 		break;
-	case ESP_A2D_AUDIO_STATE_REMOTE_SUSPEND:
-#ifdef ESPOD_ENABLED
+	case ESP_A2D_AUDIO_STATE_SUSPEND:
 		espod.playStatus = PB_STATE_PAUSED;
-#endif
 		ESP_LOGI("A2DP_CB", "ESP_A2D_AUDIO_STATE_REMOTE_SUSPEND, espod.playStatus = PB_STATE_PAUSED");
 #ifdef ZERO_VOLUME_FIX
 		nvs_set_volume(a2dp_sink.get_volume());
 #endif
 		break;
-	case ESP_A2D_AUDIO_STATE_STOPPED:
-#ifdef ESPOD_ENABLED
-		espod.playStatus = PB_STATE_STOPPED;
-#endif
-		ESP_LOGI("A2DP_CB", "ESP_A2D_AUDIO_STATE_STOPPED, espod.playStatus = PB_STATE_STOPPED");
-		break;
 	}
+
+#ifdef TRACK_POSITION_FIX
+	if (state == ESP_A2D_AUDIO_STATE_STARTED) {
+		espod.is_playing = true;
+	} 
+	else if (state == ESP_A2D_AUDIO_STATE_STOPPED) {
+		espod.is_playing = false;
+		if (espod.playStatus != PB_STATE_PAUSED) {
+			espod.rawAudioDataBytesReceived = 0; // Reset counter if stopped completely
+		}
+	}
+	else { // ESP_A2D_AUDIO_STATE_REMOTE_SUSPEND (Paused)
+		espod.is_playing = false;
+	}
+#endif
 }
+
 
 /// @brief a callback method which provides connection state of AVRC service
 /// @param connected 
@@ -786,9 +825,9 @@ void avrc_rn_volumechange_completed_callback(int volume)
 /// @param play_pos Playing Position in ms
 void avrc_rn_play_pos_callback(uint32_t play_pos)
 {
-	ESP_LOGV("AVRC_CB", "PlayPosition called");
-#ifdef ESPOD_ENABLED
+	ESP_LOGI("AVRC_CB", "PlayPosition called");
 	espod.playPosition = play_pos;
+#ifndef STATUS_NOTIFICATION_QUEUE
 	if (espod.playStatusNotificationState == NOTIF_ON && espod.trackChangeAckPending == 0x00)
 	{
 		// espod.L0x04_0x27_PlayStatusNotification(0x04, play_pos);
@@ -815,7 +854,24 @@ void avrc_metadata_callback(uint8_t id, const uint8_t *text)
 	}
 }
 
-#ifdef ESPOD_ENABLED
+#if !defined(AUDIOKIT) || defined(TRACK_POSITION_FIX)
+/// @brief Data stream reader callback
+/// @param data Data buffer to pass to the I2S
+/// @param length Length of the data buffer
+void read_data_stream(const uint8_t *data, uint32_t length)
+{
+#ifndef AUDIOKIT
+	i2s.write(data, length);
+#endif
+#ifdef TRACK_POSITION_FIX
+	// Only count bytes if audio is actively flowing
+  if (espod.is_playing) {
+    espod.rawAudioDataBytesReceived += length;
+  }
+#endif
+}
+#endif
+
 /// @brief Callback function that passes intended playback operations from the
 /// esPod to the A2DP player (i.e. the phone)
 /// @param playCommand A2DP_xx command instruction. It does not match the
@@ -829,6 +885,7 @@ void playStatusHandler(byte playCommand)
 		ESP_LOGI("A2DP_CB", "A2DP_STOP");
 		break;
 	case A2DP_PLAY:
+		espod.currentTrackIndex = 1;
 		a2dp_sink.play();
 		ESP_LOGI("A2DP_CB", "A2DP_PLAY");
 		break;
@@ -850,6 +907,5 @@ void playStatusHandler(byte playCommand)
 		break;
 	}
 }
-#endif
 
 #pragma endregion
