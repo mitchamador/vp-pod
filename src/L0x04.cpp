@@ -228,7 +228,7 @@ void L0x04::processLingo(esPod *esp, const byte *byteArray, uint32_t len)
             ESP_LOGI(IPOD_TAG, "CMD 0x%04x GetIndexedPlayingTrackTitle for index %d", cmdID, tempTrackIndex);
 
 #if TOTAL_NUM_TRACKS == 3
-            uint32_t current = platform::millis();
+            uint32_t current = platform::time_now_ms();
             uint32_t trackChangeCompletedTimeout = current - esp->trackChangeCompletedTimestamp;
             uint32_t trackChangeTimeout = current - esp->trackChangeTimestamp;
             if (trackChangeCompletedTimeout > 0 && trackChangeCompletedTimeout < FORCED_TRACK_CHANGE_TIMEOUT
@@ -346,7 +346,7 @@ void L0x04::processLingo(esPod *esp, const byte *byteArray, uint32_t len)
             L0x04::_0x27_PlayStatusNotification(esp, 0x01, esp->currentTrackIndex);
 #endif
             bool _iPodAck_OK = false;
-            uint32_t currentMillis = platform::millis();
+            uint32_t currentMillis = platform::time_now_ms();
             if (cmdID == L0x04_PlayCurrentSelection && ((currentMillis - setCurrentPlayingTrackMillis) < SKIP_PLAYCURRENT_TIMEOUT))
             {
                 ESP_LOGI(IPOD_TAG, "CMD 0x%04x PlayCurrentSelection index %d, currentTrack %d - skipping", cmdID, tempTrackIndex, _currentTrackIndex);
@@ -381,7 +381,7 @@ void L0x04::processLingo(esPod *esp, const byte *byteArray, uint32_t len)
 
             // Engage the pending ACK for expected metadata
             esp->trackChangeAckPending = cmdID;
-            esp->trackChangeTimestamp = platform::millis();
+            esp->trackChangeTimestamp = platform::time_now_ms();
             ESP_LOGD(IPOD_TAG, "Current track index %d New index %d Tracklist pos. %d Pending Meta %d Timestamp: %d --> PREV ", _currentTrackIndex, esp->currentTrackIndex, esp->trackListPosition, (esp->trackChangeAckPending > 0x00), esp->trackChangeTimestamp);
             L0x04::_0x01_iPodAck(esp, iPodAck_CmdPending, cmdID, TRACK_CHANGE_TIMEOUT);
 
@@ -426,7 +426,7 @@ void L0x04::processLingo(esPod *esp, const byte *byteArray, uint32_t len)
 
                 // Engage the pending ACK for expected metadata
                 esp->trackChangeAckPending = cmdID;
-                esp->trackChangeTimestamp = platform::millis();
+                esp->trackChangeTimestamp = platform::time_now_ms();
                 ESP_LOGD(IPOD_TAG, "Prev. index %d New index %d Tracklist pos. %d Pending Meta %d Timestamp: %d --> PREV ", esp->prevTrackIndex, esp->currentTrackIndex, esp->trackListPosition, (esp->trackChangeAckPending > 0x00), esp->trackChangeTimestamp);
                 L0x04::_0x01_iPodAck(esp, iPodAck_CmdPending, cmdID, TRACK_CHANGE_TIMEOUT);
 
@@ -459,7 +459,7 @@ void L0x04::processLingo(esPod *esp, const byte *byteArray, uint32_t len)
 
                 // Engage the pending ACK for expected metadata
                 esp->trackChangeAckPending = cmdID;
-                esp->trackChangeTimestamp = platform::millis();
+                esp->trackChangeTimestamp = platform::time_now_ms();
                 ESP_LOGD(IPOD_TAG, "Prev. index %d New index %d Tracklist pos. %d Pending Meta %d Timestamp: %d --> NEXT ", esp->prevTrackIndex, esp->currentTrackIndex, esp->trackListPosition, (esp->trackChangeAckPending > 0x00), esp->trackChangeTimestamp);
                 L0x04::_0x01_iPodAck(esp, iPodAck_CmdPending, cmdID, TRACK_CHANGE_TIMEOUT);
 
@@ -514,7 +514,7 @@ void L0x04::processLingo(esPod *esp, const byte *byteArray, uint32_t len)
 #endif
                 // Engage the pending ACK for expected metadata
                 esp->trackChangeAckPending = cmdID;
-                esp->trackChangeTimestamp = platform::millis();
+                esp->trackChangeTimestamp = platform::time_now_ms();
                 ESP_LOGD(IPOD_TAG, "Prev. index %d New index %d Tracklist pos. %d Pending Meta %d Timestamp: %d --> EXPLICIT NEXT TRACK", esp->prevTrackIndex, esp->currentTrackIndex, esp->trackListPosition, (esp->trackChangeAckPending > 0x00), esp->trackChangeTimestamp);
                 L0x04::_0x01_iPodAck(esp, iPodAck_CmdPending, cmdID, TRACK_CHANGE_TIMEOUT);
 
@@ -552,7 +552,7 @@ void L0x04::processLingo(esPod *esp, const byte *byteArray, uint32_t len)
 
                 // Engage the pending ACK for expected metadata
                 esp->trackChangeAckPending = cmdID;
-                esp->trackChangeTimestamp = platform::millis();
+                esp->trackChangeTimestamp = platform::time_now_ms();
                 L0x04::_0x01_iPodAck(esp, iPodAck_CmdPending, cmdID, TRACK_CHANGE_TIMEOUT);
 
                 if (esp->_playStatusHandler)

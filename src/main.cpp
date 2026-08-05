@@ -204,22 +204,22 @@ void setup()
 {
 // If available, reset the UART1 transceiver
 #ifdef UART1_RST
-	pinMode(UART1_RST, OUTPUT);
-	digitalWrite(UART1_RST, LOW);
+	platform::gpio_configure(UART1_RST, platform::PinMode::Output);
+	platform::gpio_write(UART1_RST, platform::PinLevel::Low);
 #endif
 
 #ifdef LED_BUILTIN
-	pinMode(LED_BUILTIN, OUTPUT);
-	digitalWrite(LED_BUILTIN, INVERT_LED_LOGIC(LOW));
+	platform::gpio_configure(LED_BUILTIN, platform::PinMode::Output);
+	platform::gpio_write(LED_BUILTIN, INVERT_LED_LOGIC(platform::PinLevel::Low));
 #endif
 
 #ifdef RESET_STATE_KEY
-	pinMode(RESET_STATE_KEY, INPUT);
+	platform::gpio_configure(RESET_STATE_KEY, platform::PinMode::Input);
 #endif
 
 #ifdef ENABLE_ACTIVE_DCD
-	pinMode(DCD_CTRL_PIN, OUTPUT);
-	digitalWrite(DCD_CTRL_PIN, INVERT_DCD_LOGIC(HIGH)); // Logic is inverted
+	platform::gpio_configure(DCD_CTRL_PIN, platform::PinMode::Output);
+	platform::gpio_write(DCD_CTRL_PIN, INVERT_DCD_LOGIC(platform::PinLevel::High)); // Logic is inverted
 #endif
 
 	esp_log_level_set("*", ESP_LOG_NONE);
@@ -229,21 +229,21 @@ void setup()
 
 	// Inform of possible errors that led to a reset
 	ESP_LOGI("RESET", "Reset reason: %d", esp_reset_reason());
-	platform::delay(5);
+	platform::delay_ms(5);
 
 	// Publish build information
 	ESP_LOGI("BUILD_INFO", "env:%s\t date: %s\t time: %s", PIOENV, __DATE__, __TIME__);
-	platform::delay(5);
+	platform::delay_ms(5);
 	ESP_LOGI("VERSION", "%s", VERSION_STRING);
-	platform::delay(5);
+	platform::delay_ms(5);
 	ESP_LOGI("BRANCH", "%s", VERSION_BRANCH);
-	platform::delay(5);
+	platform::delay_ms(5);
 
 	if (initializeAVRCTask() != ESP_OK)
 		esp_restart();
 	initializeA2DPSink();
 #ifdef UART1_RST // Re-enable the UART1 transceiver if available
-	digitalWrite(UART1_RST, HIGH);
+	platform::gpio_write(UART1_RST, platform::PinLevel::High);
 #endif
 	initializeSerial();
 	espod.attachPlayControlHandler(playStatusHandler);
@@ -259,13 +259,13 @@ void loop()
 {
 #ifdef RESET_STATE_KEY
 	
-	uint32_t start_key_pressed = 0;
-	bool clean_last_connection;
+	static uint32_t start_key_pressed = 0;
+	static bool clean_last_connection;
 	
-	if (digitalRead(RESET_STATE_KEY) == 0)
+	if (platform::gpio_read(RESET_STATE_KEY) == platform::PinLevel::Low)
 	{
 		if (start_key_pressed != 0) {
-			if (!clean_last_connection && platform::millis() - start_key_pressed > 10000)
+			if (!clean_last_connection && platform::time_now_ms() - start_key_pressed > 10000)
 			{
 				ESP_LOGI("MAIN", "Clean last connection");
 				if (a2dp_sink.get_connection_state() != ESP_A2D_CONNECTION_STATE_DISCONNECTED)
@@ -276,7 +276,7 @@ void loop()
 				clean_last_connection = true;
 			}
 		} else {
-			start_key_pressed = platform::millis();
+			start_key_pressed = platform::time_now_ms();
 		}
 	}
 	else
@@ -292,7 +292,7 @@ void loop()
 		ESP_LOGI("MAIN", "Waiting for peer");
 	} else if (peer_state == PEER_CONNECTING && a2dp_sink.get_connection_state() == ESP_A2D_CONNECTION_STATE_CONNECTED)
 	{
-		platform::delay(50);
+		platform::delay_ms(50);
 		peer_state = PEER_CONNECTED;
 #ifdef USE_PEER_NAME
 		espod._peer_name = a2dp_sink.get_peer_name();
@@ -305,7 +305,7 @@ void loop()
 	{
 		peer_state = PEER_DISCONNECTED;
 	}
-	platform::delay(10);
+	platform::delay_ms(10);
 }
 
 #pragma region AVRC Task and Queue declaration/definition
@@ -380,7 +380,7 @@ static void processAVRCTask(void *pvParameters)
 		// Check incoming metadata in queue
 		if (xQueueReceive(avrcMetadataQueue, &incMetadata, 0) == pdTRUE)
 		{
-			avrcMetadataTimestamp = platform::millis();
+			avrcMetadataTimestamp = platform::time_now_ms();
 
 			// Start processing
 			switch (incMetadata.id)
@@ -411,7 +411,7 @@ static void processAVRCTask(void *pvParameters)
 			delete[] incMetadata.payload;
 			incMetadata.payload = nullptr;
 		}
-		if (avrcMetadataTimestamp != INVALID_TIMESTAMP && platform::millis() - avrcMetadataTimestamp > AVRC_RECEIVE_METADATA_TIMEOUT)
+		if (avrcMetadataTimestamp != INVALID_TIMESTAMP && platform::time_now_ms() - avrcMetadataTimestamp > AVRC_RECEIVE_METADATA_TIMEOUT)
 		{
 			avrcMetadataTimestamp = INVALID_TIMESTAMP;
 
@@ -429,7 +429,7 @@ static void processAVRCTask(void *pvParameters)
 void initializeSDCard()
 {
 #ifdef USE_SD
-	if (digitalRead(SD_DETECT) == LOW)
+	if (platform::gpio_read(SD_DETECT) == platform::PinLevel::Low)
 	{
 		if (initSD())
 		{
@@ -531,7 +531,7 @@ void initializeA2DPSink()
 	a2dp_sink.start(A2DP_SINK_NAME);
 
 	ESP_LOGI("SETUP", "a2dp_sink started: %s", A2DP_SINK_NAME);
-	platform::delay(500);
+	platform::delay_ms(500);
 	a2dp_sink.set_discoverability(ESP_BT_GENERAL_DISCOVERABLE);
 }
 
@@ -579,7 +579,7 @@ void connectionStateChanged(esp_a2d_connection_state_t state, void *ptr)
 		ESP_LOGI("A2DP_CB", "ESP_A2D_CONNECTION_STATE_CONNECTED, espod enabled");
 		espod.disabled = false;
 #ifdef LED_BUILTIN
-		digitalWrite(LED_BUILTIN, INVERT_LED_LOGIC(HIGH));
+		platform::gpio_write(LED_BUILTIN, INVERT_LED_LOGIC(platform::PinLevel::High));
 #endif
 #ifdef ZERO_VOLUME_FIX
 		volume_state = VOLUME_AFTER_CONNECTION_NOT_DEFINED;
@@ -590,7 +590,7 @@ void connectionStateChanged(esp_a2d_connection_state_t state, void *ptr)
 		espod.resetState();
 		espod.disabled = true;
 #ifdef LED_BUILTIN
-		digitalWrite(LED_BUILTIN, INVERT_LED_LOGIC(LOW));
+		platform::gpio_write(LED_BUILTIN, INVERT_LED_LOGIC(platform::PinLevel::Low));
 #endif
 		if (connection_state == ESP_A2D_CONNECTION_STATE_CONNECTING) // no connected state -> reconnect
 		{
@@ -600,7 +600,7 @@ void connectionStateChanged(esp_a2d_connection_state_t state, void *ptr)
 		break;
 	}
 #ifdef ENABLE_ACTIVE_DCD
-	digitalWrite(DCD_CTRL_PIN, INVERT_DCD_LOGIC(espod.disabled)); // Logic inversion by MACRO
+	platform::gpio_write(DCD_CTRL_PIN, INVERT_DCD_LOGIC(espod.disabled ? platform::PinLevel::High : platform::PinLevel::Low)); // Logic inversion by MACRO
 #endif
 }
 

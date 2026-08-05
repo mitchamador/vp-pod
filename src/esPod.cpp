@@ -67,8 +67,8 @@ void esPod::_rxTask(void *pvParameters)
     uint32_t expLength = 0;
     uint32_t cursor = 0;
 
-    unsigned long lastByteRX = platform::millis();   // Last time a byte was RXed in a packet
-    unsigned long lastActivity = platform::millis(); // Last time any RX activity was detected
+    unsigned long lastByteRX = platform::time_now_ms();   // Last time a byte was RXed in a packet
+    unsigned long lastActivity = platform::time_now_ms(); // Last time any RX activity was detected
 
     aapCommand cmd;
 
@@ -105,12 +105,12 @@ void esPod::_rxTask(void *pvParameters)
             while (esPodInstance->_uart.available())
             {
                 // Timestamping the last activity on RX
-                lastActivity = platform::millis();
+                lastActivity = platform::time_now_ms();
                 incByte = esPodInstance->_uart.read();
                 // If we are not in the middle of a RX, and we receive a 0xFF 0x55, start sequence, reset expected length and position cursor
                 if (prevByte == 0xFF && incByte == 0x55 && !esPodInstance->_rxIncomplete)
                 {
-                    lastByteRX = platform::millis();
+                    lastByteRX = platform::time_now_ms();
                     esPodInstance->_rxIncomplete = true;
                     expLength = 0;
                     cursor = 0;
@@ -118,7 +118,7 @@ void esPod::_rxTask(void *pvParameters)
                 else if (esPodInstance->_rxIncomplete)
                 {
                     // Timestamping the last byte received
-                    lastByteRX = platform::millis();
+                    lastByteRX = platform::time_now_ms();
                     // Expected length has not been received yet
                     if (expLength == 0 && cursor == 0)
                     {
@@ -179,7 +179,7 @@ void esPod::_rxTask(void *pvParameters)
                 // Always update the previous byte
                 prevByte = incByte;
             }
-            if (esPodInstance->_rxIncomplete && platform::millis() - lastByteRX > INTERBYTE_TIMEOUT) // If we are in the middle of a packet and we haven't received a byte in 1s, discard the packet
+            if (esPodInstance->_rxIncomplete && platform::time_now_ms() - lastByteRX > INTERBYTE_TIMEOUT) // If we are in the middle of a packet and we haven't received a byte in 1s, discard the packet
             {
                 ESP_LOGW(__func__, "Packet incomplete, discarding");
                 esPodInstance->_rxIncomplete = false;
@@ -187,10 +187,10 @@ void esPod::_rxTask(void *pvParameters)
                 // cmd.length = 0;
                 // TODO: Send a NACK to the Accessory
             }
-            if (platform::millis() - lastActivity > SERIAL_TIMEOUT) // If we haven't received any byte in 30s, reset the RX state
+            if (platform::time_now_ms() - lastActivity > SERIAL_TIMEOUT) // If we haven't received any byte in 30s, reset the RX state
             {
                 // Reset the timestamp for next Serial timeout
-                lastActivity = platform::millis();
+                lastActivity = platform::time_now_ms();
 #ifndef NO_RESET_ON_SERIAL_TIMEOUT
                 ESP_LOGW(__func__, "No activity in %lu ms, resetting RX state", SERIAL_TIMEOUT);
                 esPodInstance->resetState();
@@ -759,7 +759,7 @@ void esPod::updateMetadata(const TrackMetadata *pending, byte direction)
             ESP_LOGD("AVRC_CB",
                      "Artist+Album+Title+Duration +++ ACK Pending "
                      "0x%x\n\tPending duration: %d",
-                     espod.trackChangeAckPending, platform::millis() - espod.trackChangeTimestamp);
+                     espod.trackChangeAckPending, platform::time_now_ms() - espod.trackChangeTimestamp);
             // espod.L0x04_0x01_iPodAck(iPodAck_OK, espod.trackChangeAckPending);
             if (trackChangeAckPending == 0x11)
             {
@@ -781,17 +781,17 @@ void esPod::updateMetadata(const TrackMetadata *pending, byte direction)
             // force Audi MMI to redraw track's information
             if (_trackChangeAckPending == 0x00)
             {
-                trackChangeTimestamp = platform::millis();
+                trackChangeTimestamp = platform::time_now_ms();
                 L0x04::_0x27_PlayStatusNotification(this, 0x01, direction == PB_CMD_PREV ? 0 : TOTAL_NUM_TRACKS - 1);
             }
 
-            uint32_t trackNotificationDelay = platform::millis() - trackChangeTimestamp;
+            uint32_t trackNotificationDelay = platform::time_now_ms() - trackChangeTimestamp;
             if (trackNotificationDelay > 0 && trackNotificationDelay < TRACK_CHANGE_NOTIFICATION_TIMEOUT)
             {
                 vTaskDelay(pdMS_TO_TICKS(TRACK_CHANGE_NOTIFICATION_TIMEOUT - trackNotificationDelay));
             }
 
-            trackChangeCompletedTimestamp = platform::millis();
+            trackChangeCompletedTimestamp = platform::time_now_ms();
             currentTrackIndex = INVALID_TRACK_NUM;
 #endif
             L0x04::_0x27_PlayStatusNotification(this, 0x01, currentTrackIndex != INVALID_TRACK_NUM ? currentTrackIndex : START_INDEX);
