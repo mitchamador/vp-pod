@@ -1,57 +1,6 @@
 #include "esPod.h"
 
 //-----------------------------------------------------------------------
-//|                           Local utilities                           |
-//-----------------------------------------------------------------------
-// #pragma region Local utilities
-// // ESP32 is Little-Endian, iPod is Big-Endian
-// template <typename T>
-// T swap_endian(T u)
-// {
-//     static_assert(CHAR_BIT == 8, "CHAR_BIT != 8");
-
-//     union
-//     {
-//         T u;
-//         unsigned char u8[sizeof(T)];
-//     } source, dest;
-
-//     source.u = u;
-
-//     for (size_t k = 0; k < sizeof(T); k++)
-//         dest.u8[k] = source.u8[sizeof(T) - k - 1];
-
-//     return dest.u;
-// }
-
-// /// @brief (Re)starts a timer and changes the interval on the fly.
-// /// @param timer Timer handle to (re)start.
-// /// @param time_ms New interval in milliseconds. No verification is done if this is 0! Defaults to TRACK_CHANGE_TIMEOUT.
-// void startTimer(TimerHandle_t timer, unsigned long time_ms = TRACK_CHANGE_TIMEOUT)
-// {
-//     // If the timer is already active, it needs to be stopped without a callback call first
-//     if (xTimerIsTimerActive(timer) == pdTRUE)
-//     {
-//         xTimerStop(timer, 0);
-//     }
-//     // Change the period and start the timer
-//     xTimerChangePeriod(timer, pdMS_TO_TICKS(time_ms), 0);
-//     xTimerStart(timer, 0);
-// }
-
-// /// @brief Stops a running timer. No status is returned if it was already stopped.
-// /// @param timer Handle to the Timer that needs to be stopped.
-// void stopTimer(TimerHandle_t timer)
-// {
-//     // If the timer is already active, it needs to be stop without a callback call first
-//     if (xTimerIsTimerActive(timer) == pdTRUE)
-//     {
-//         xTimerStop(timer, 0);
-//     }
-// }
-// #pragma endregion
-
-//-----------------------------------------------------------------------
 //|                      Cardinal tasks and Timers                      |
 //-----------------------------------------------------------------------
 #pragma region Tasks
@@ -720,28 +669,65 @@ void esPod::resetState()
     _pendingCmdId_0x04 = 0x00;
 }
 
-void esPod::attachPlayControlHandler(playStatusHandler_t playHandler)
+void esPod::attachPlaybackSource(IBluetoothPlaybackSource &btSource)
 {
-    _playStatusHandler = playHandler;
-    ESP_LOGD(IPOD_TAG, "PlayControlHandler attached.");
+    _btSource = &btSource;
+    _btSource->setEventSink(*this);
+    ESP_LOGD(IPOD_TAG, "Bluetooth playback source attached.");
 }
 
 uint32_t esPod::getPlayPosition() {
-#ifdef TRACK_POSITION_FIX    
-    if (playPosition != 0) {
-        return playPosition;
-    }
-    uint32_t calculatedPlayPosition = (uint32_t) (rawAudioDataBytesReceived / (BYTES_PER_SECOND / 1000.0));
-    if (calculatedPlayPosition > 500) {
-        return calculatedPlayPosition;
-    }
-    return 0;
-#else
     return playPosition;
+}
+
+//-----------------------------------------------------------------------
+//|                    IBluetoothSourceEvents impl                      |
+//-----------------------------------------------------------------------
+void esPod::onConnectionStateChanged(BtConnectionState state, const char *peerName)
+{
+    switch (state)
+    {
+    case BtConnectionState::Connecting:
+        break;
+    case BtConnectionState::Connected:
+        ESP_LOGI(IPOD_TAG, "Bluetooth connected, espod enabled");
+        disabled = false;
+#ifdef USE_PEER_NAME
+        _peer_name = peerName;
+        ESP_LOGI(IPOD_TAG, "Peer connected: %s", _peer_name ? _peer_name : "?");
+#endif
+        break;
+    case BtConnectionState::Disconnected:
+        ESP_LOGI(IPOD_TAG, "Bluetooth disconnected, espod disabled");
+        resetState();
+        disabled = true;
+        break;
+    }
+}
+
+void esPod::onPlayStateChanged(BtPlayState state)
+{
+    playStatus = (state == BtPlayState::Playing) ? PB_STATE_PLAYING : PB_STATE_PAUSED;
+    ESP_LOGI(IPOD_TAG, "Bluetooth play state changed, playStatus = %d", playStatus);
+}
+
+void esPod::onPlayPosition(uint32_t positionMs)
+{
+    playPosition = positionMs;
+#ifndef STATUS_NOTIFICATION_QUEUE
+    if (playStatusNotificationState == NOTIF_ON && trackChangeAckPending == 0x00)
+    {
+        L0x04::_0x27_PlayStatusNotification(this, 0x04, positionMs);
+    }
 #endif
 }
 
-void esPod::updateMetadata(const TrackMetadata *pending, byte direction)
+void esPod::onTrackMetadata(const TrackMetadata &metadata, byte direction)
+{
+    _applyTrackMetadata(&metadata, direction);
+}
+
+void esPod::_applyTrackMetadata(const TrackMetadata *pending, byte direction)
 {
     // always update track duration
     trackDuration = pending->duration;
@@ -759,7 +745,7 @@ void esPod::updateMetadata(const TrackMetadata *pending, byte direction)
             ESP_LOGD("AVRC_CB",
                      "Artist+Album+Title+Duration +++ ACK Pending "
                      "0x%x\n\tPending duration: %d",
-                     espod.trackChangeAckPending, platform::time_now_ms() - espod.trackChangeTimestamp);
+                     espod.trackChangeAckPending, platform::millis() - espod.trackChangeTimestamp);
             // espod.L0x04_0x01_iPodAck(iPodAck_OK, espod.trackChangeAckPending);
             if (trackChangeAckPending == 0x11)
             {

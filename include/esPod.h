@@ -7,6 +7,8 @@
 #include "esPod_utils.h"
 #include "IUart.h"
 #include "platform.h"
+#include "IBluetoothPlaybackSource.h"
+#include "IBluetoothSourceEvents.h"
 
 #ifndef IPOD_TAG
 #define IPOD_TAG "esPod"
@@ -17,15 +19,13 @@ constexpr uint32_t INVALID_TRACK_NUM = UINT32_MAX;
 
 class IUart;
 
-class esPod
+class esPod : public IBluetoothSourceEvents
 {
     friend class L0x00;
     friend class L0x03;
     friend class L0x04;
 
 public:
-    typedef void playStatusHandler_t(byte playControlCommand);
-
     // State variables
     bool extendedInterfaceModeActive = false;
     bool disabled = true; // espod starts disabled... it means it keeps flushing the Serial until it is ready to process something
@@ -84,20 +84,13 @@ public:
 #else
     uint32_t trackChangeCompletedTimestamp = INVALID_TIMESTAMP;
 #endif
-    // 44100Hz * 2 channels * 2 bytes (16-bit) = 176400 bytes per second
-    const uint32_t BYTES_PER_SECOND = 176400;
-
-#ifdef TRACK_POSITION_FIX
-    volatile uint32_t rawAudioDataBytesReceived = 0;
-    volatile bool is_playing = false;
-#endif
 
 #ifdef STATUS_NOTIFICATION_QUEUE
     QueueHandle_t _statusChangeNotificationTimerQueue;
 #endif
 
 #ifdef USE_PEER_NAME
-    const char *_peer_name;
+    const char *_peer_name = nullptr;
 #endif
 
 private:
@@ -163,14 +156,26 @@ private:
     const uint8_t _SWrevision = 0x00;
     const char *_serialNumber = "AB345F7HIJK";
 
-    // Handler functions
-    playStatusHandler_t *_playStatusHandler = nullptr;
+    // Outgoing playback commands go through this - set via attachPlaybackSource()
+    IBluetoothPlaybackSource *_btSource = nullptr;
+
+    // Applies pending metadata, handling the ack/notification dance.
+    void _applyTrackMetadata(const TrackMetadata *pending, byte direction);
 
 public:
     explicit esPod(IUart &uart);
     ~esPod();
     void resetState();
-    void attachPlayControlHandler(playStatusHandler_t playHandler);
+
+    /// @brief Attaches the Bluetooth backend that outgoing playback
+    /// commands (play/pause/next/...) are sent to.
+    void attachPlaybackSource(IBluetoothPlaybackSource &btSource);
+
     uint32_t getPlayPosition();
-    void updateMetadata(const TrackMetadata *pending, byte direction);
+
+    // IBluetoothSourceEvents - called by the attached Bluetooth backend
+    void onConnectionStateChanged(BtConnectionState state, const char *peerName) override;
+    void onPlayStateChanged(BtPlayState state) override;
+    void onTrackMetadata(const TrackMetadata &metadata, byte direction) override;
+    void onPlayPosition(uint32_t positionMs) override;
  };

@@ -4,9 +4,11 @@
 #include "BluetoothA2DPSink.h"
 
 #include "esPod.h"
+#include "Esp32A2dpBluetoothSource.h"
 
-#ifdef ZERO_VOLUME_FIX
-#include "ArduinoNvs.h"
+#ifdef USE_SD
+#include "sdLogUpdate.h"
+bool sdLoggerEnabled = false;
 #endif
 
 #pragma region Board IO Macros
@@ -32,14 +34,12 @@
 #endif
 #pragma endregion
 
-#pragma region A2DP Sink Configuration and Serial Initialization
+#pragma region Audio output + Bluetooth backend wiring
+// Audio output routing (I2S/codec) is board-specific and stays here, same
+// as before - only the A2DP/AVRCP protocol handling moved into
+// Esp32A2dpBluetoothSource.
 
 #ifdef AUDIOKIT
-
-#ifdef USE_SD
-#include "sdLogUpdate.h"
-bool sdLoggerEnabled = false;
-#endif
 
 #include "AudioBoard.h"
 #include "AudioTools/AudioLibs/I2SCodecStream.h"
@@ -85,6 +85,19 @@ BluetoothA2DPSink a2dp_sink;
 
 #endif
 
+// On AUDIOKIT boards a2dp_sink already writes into i2s directly, so the
+// backend doesn't need a raw output stream (nullptr). On other boards the
+// backend writes into i2s manually from its raw stream-reader callback.
+#ifdef AUDIOKIT
+Esp32A2dpBluetoothSource btSource(a2dp_sink);
+#else
+Esp32A2dpBluetoothSource btSource(a2dp_sink, &i2s);
+#endif
+
+#pragma endregion
+
+#pragma region Serial Initialization
+
 #if defined(ARDUINO) && !defined(USE_ESP_IDF_SERIAL)
 
 #include "ArduinoUart.h"
@@ -115,90 +128,11 @@ esPod espod(uart);
 
 #pragma endregion
 
-#pragma region FreeRTOS tasks defines
-#ifndef AVRC_QUEUE_SIZE
-#define AVRC_QUEUE_SIZE 32
-#endif
-#ifndef PROCESS_AVRC_TASK_STACK_SIZE
-#define PROCESS_AVRC_TASK_STACK_SIZE 4096
-#endif
-#ifndef PROCESS_AVRC_TASK_PRIORITY
-#define PROCESS_AVRC_TASK_PRIORITY 6
-#endif
-#ifndef AVRC_INTERVAL_MS
-#define AVRC_INTERVAL_MS 5
-#endif
-#pragma endregion
-
 #pragma region Helper Functions declaration
 void initializeSDCard();
 void initializeSerial();
-void initializeA2DPSink();
-esp_err_t initializeAVRCTask();
-#ifdef ZERO_VOLUME_FIX
-uint8_t nvs_get_volume();
-void nvs_set_volume(uint8_t volume);
-#endif
+void initializeAudioOutput();
 #pragma endregion
-
-#pragma region A2DP/AVRC callbacks declaration
-void connectionStateChanged(esp_a2d_connection_state_t state, void *ptr);
-void audioStateChanged(esp_a2d_audio_state_t state, void *ptr);
-void avrc_rn_play_pos_callback(uint32_t play_pos);
-void avrc_metadata_callback(uint8_t id, const uint8_t *text);
-void avrc_connection_state_callback(bool connected);
-#ifdef ZERO_VOLUME_FIX
-void avrc_rn_volumechange_callback(int volume);
-void avrc_rn_volumechange_completed_callback(int volume);
-#endif
-void playStatusHandler(byte playCommand);
-#if defined(TRACK_POSITION_FIX)
-void read_data_stream(const uint8_t *data, uint32_t length);
-#endif
-#ifdef TRACK_CHANGE_CALLBACK
-void avrc_rn_track_change_callback(uint8_t *uid);
-#endif
-
-#pragma endregion
-
-typedef enum {
-   PEER_DISCONNECTED = 0,
-	PEER_CONNECTING,
-   PEER_CONNECTED
-} t_peer_state;
-
-t_peer_state peer_state;
-
-#ifdef ZERO_VOLUME_FIX
-
-typedef enum {
-	VOLUME_AFTER_CONNECTION_NOT_DEFINED = 0,
-	VOLUME_AFTER_CONNECTION_SET
-} t_volume_state;
-
-t_volume_state volume_state;
-
-uint8_t nvs_get_volume()
-{
-	ESP_LOGI("MAIN", "get volume from NVS");
-	// get volume from NVS
-	return NVS.getInt("volume", 32);
-}
-
-void nvs_set_volume(uint8_t volume)
-{
-	if (volume != nvs_get_volume())
-	{
-		ESP_LOGI("MAIN", "set volume to NVS");
-		// set volume to NVS
-		if (!NVS.setInt("volume", volume, true))
-		{
-			ESP_LOGE("MAIN", "failed to save volume to NVS");
-		}
-	}
-}
-
-#endif
 
 void setup()
 {
@@ -239,43 +173,38 @@ void setup()
 	ESP_LOGI("BRANCH", "%s", VERSION_BRANCH);
 	platform::delay_ms(5);
 
-	if (initializeAVRCTask() != ESP_OK)
-		esp_restart();
-	initializeA2DPSink();
+	initializeAudioOutput();
+
+	espod.attachPlaybackSource(btSource);
+	btSource.begin(A2DP_SINK_NAME);
+
 #ifdef UART1_RST // Re-enable the UART1 transceiver if available
 	platform::gpio_write(UART1_RST, platform::PinLevel::High);
 #endif
 	initializeSerial();
-	espod.attachPlayControlHandler(playStatusHandler);
-#ifdef ZERO_VOLUME_FIX
-	NVS.begin();
-#endif
-	peer_state = PEER_DISCONNECTED;
+
 	ESP_LOGI("SETUP", "Setup finished");
 }
-
 
 void loop()
 {
 #ifdef RESET_STATE_KEY
 	
-	static uint32_t start_key_pressed = 0;
-	static bool clean_last_connection;
+	uint32_t start_key_pressed = 0;
+	bool clean_last_connection;
 	
-	if (platform::gpio_read(RESET_STATE_KEY) == platform::PinLevel::Low)
+	if (digitalRead(RESET_STATE_KEY) == 0)
 	{
 		if (start_key_pressed != 0) {
 			if (!clean_last_connection && platform::time_now_ms() - start_key_pressed > 10000)
 			{
 				ESP_LOGI("MAIN", "Clean last connection");
-				if (a2dp_sink.get_connection_state() != ESP_A2D_CONNECTION_STATE_DISCONNECTED)
-				{
-					a2dp_sink.disconnect();
-				}
-				a2dp_sink.clean_last_connection();
+				btSource.forgetConnection();
 				clean_last_connection = true;
 			}
-		} else {
+		}
+		else
+		{
 			start_key_pressed = platform::time_now_ms();
 		}
 	}
@@ -284,145 +213,17 @@ void loop()
 		start_key_pressed = 0;
 		clean_last_connection = false;
 	}
-
 #endif
 
-	if (peer_state == PEER_DISCONNECTED) {
-		peer_state = PEER_CONNECTING;
-		ESP_LOGI("MAIN", "Waiting for peer");
-	} else if (peer_state == PEER_CONNECTING && a2dp_sink.get_connection_state() == ESP_A2D_CONNECTION_STATE_CONNECTED)
-	{
-		platform::delay_ms(50);
-		peer_state = PEER_CONNECTED;
-#ifdef USE_PEER_NAME
-		espod._peer_name = a2dp_sink.get_peer_name();
-		ESP_LOGI("MAIN", "Peer connected: %s", espod._peer_name);
-#else
-		ESP_LOGI("MAIN", "Peer connected: %s", a2dp_sink.get_peer_name());
+#ifdef LED_BUILTIN
+	platform::gpio_write(LED_BUILTIN, INVERT_LED_LOGIC(espod.disabled ? platform::PinLevel::Low : platform::PinLevel::High));
 #endif
-	}
-	else if (peer_state == PEER_CONNECTED && a2dp_sink.get_connection_state() == ESP_A2D_CONNECTION_STATE_DISCONNECTED)
-	{
-		peer_state = PEER_DISCONNECTED;
-	}
+#ifdef ENABLE_ACTIVE_DCD
+	platform::gpio_write(DCD_CTRL_PIN, INVERT_DCD_LOGIC(espod.disabled ? platform::PinLevel::High : platform::PinLevel::Low));
+#endif
+
 	platform::delay_ms(10);
 }
-
-#pragma region AVRC Task and Queue declaration/definition
-// Metadata universal structure
-struct avrcMetadata
-{
-	uint8_t id = 0;
-	uint8_t *payload = nullptr;
-};
-
-// AVRC Queue and Task
-QueueHandle_t avrcMetadataQueue;
-TaskHandle_t processAVRCTaskHandle;
-
-void filterPayload(char *output, const char *input) {
-    size_t in_idx = 0, out_idx = 0, max_len = 255;
-    while (input[in_idx] != '\0' && out_idx < max_len - 1) {
-        unsigned char c = input[in_idx];
-        
-        // Check for UTF-8 byte length based on leading bits
-        int char_len = 1;
-        if (c >= 0xF0) {
-            char_len = 4; // 4-byte characters (most emojis live here)
-        } else if (c >= 0xE0) {
-            char_len = 3; // 3-byte characters (some symbols/emojis)
-        } else if (c >= 0xC0) {
-            char_len = 2; // 2-byte characters
-        }
-
-        // If it's a 4-byte or high 3-byte sequence, skip it (treat as emoji/unsupported symbol)
-        if (char_len >= 4 || (char_len == 3 && c >= 0xEF)) {
-            in_idx += char_len;
-        } else {
-            // Copy valid standard bytes
-            for (int i = 0; i < char_len && input[in_idx + i] != '\0'; i++) {
-                output[out_idx++] = input[in_idx++];
-            }
-        }
-    }
-    output[out_idx] = '\0';
-}
-
-/// @brief Low priority task to process a queue of received metadata
-/// @param pvParameters
-static void processAVRCTask(void *pvParameters)
-{
-	avrcMetadata incMetadata; // Incoming metadata (pointer to payload)
-	
-	TrackMetadata pendingMetadata;
-
-	uint32_t trackNum = INVALID_TRACK_NUM, prevTrackNum = INVALID_TRACK_NUM;
-	uint32_t avrcMetadataTimestamp = INVALID_TIMESTAMP;
-
-#ifdef STACK_HIGH_WATERMARK_LOG
-	UBaseType_t uxHighWaterMark;
-	UBaseType_t minHightWaterMark = PROCESS_AVRC_TASK_STACK_SIZE;
-#endif
-
-	// Main loop
-	while (true)
-	{
-// Stack high watermark logging
-#ifdef STACK_HIGH_WATERMARK_LOG
-		uxHighWaterMark = uxTaskGetStackHighWaterMark(NULL);
-		if (uxHighWaterMark < minHightWaterMark)
-		{
-			minHightWaterMark = uxHighWaterMark;
-			ESP_LOGI("HWM", "Process AVRC Task High Watermark: %d, used stack: %d", minHightWaterMark,
-					 PROCESS_AVRC_TASK_STACK_SIZE - minHightWaterMark);
-		}
-#endif
-		// Check incoming metadata in queue
-		if (xQueueReceive(avrcMetadataQueue, &incMetadata, 0) == pdTRUE)
-		{
-			avrcMetadataTimestamp = platform::time_now_ms();
-
-			// Start processing
-			switch (incMetadata.id)
-			{
-			case ESP_AVRC_MD_ATTR_TRACK_NUM:
-				trackNum = String((char *)incMetadata.payload).toInt();
-				if (prevTrackNum == INVALID_TRACK_NUM)
-					prevTrackNum = trackNum;
-				break;
-			case ESP_AVRC_MD_ATTR_TITLE:
-				filterPayload(pendingMetadata.title, (char *)incMetadata.payload);
-#ifdef TRACK_POSITION_FIX
-					// Reset the byte counter immediately for the new track
-					espod.rawAudioDataBytesReceived = 0;
-#endif
-				break;
-			case ESP_AVRC_MD_ATTR_ALBUM:
-				filterPayload(pendingMetadata.album, (char *)incMetadata.payload);
-				break;
-			case ESP_AVRC_MD_ATTR_ARTIST:
-				filterPayload(pendingMetadata.artist, (char *)incMetadata.payload);
-				break;
-			case ESP_AVRC_MD_ATTR_PLAYING_TIME:
-				pendingMetadata.duration = String((char *)incMetadata.payload).toInt();
-				break;
-			}
-			// End Processing, deallocate memory
-			delete[] incMetadata.payload;
-			incMetadata.payload = nullptr;
-		}
-		if (avrcMetadataTimestamp != INVALID_TIMESTAMP && platform::time_now_ms() - avrcMetadataTimestamp > AVRC_RECEIVE_METADATA_TIMEOUT)
-		{
-			avrcMetadataTimestamp = INVALID_TIMESTAMP;
-
-			espod.updateMetadata(&pendingMetadata, trackNum < prevTrackNum ? PB_CMD_PREV : PB_CMD_NEXT);
-
-			prevTrackNum = trackNum;
-		}
-		vTaskDelay(pdMS_TO_TICKS(AVRC_INTERVAL_MS));
-	}
-}
-#pragma endregion
 
 #pragma region Helper Function Definitions
 /// @brief Attempts to initialize the SD card if present and enabled
@@ -485,13 +286,12 @@ void initializeSerial()
         0));
 
     uart_flush(UART_NUM_1);
-
-    //return ESP_OK;
 #endif
 }
 
-/// @brief Configures the CODEC or DAC and starts the A2DP Sink
-void initializeA2DPSink()
+/// @brief Configures the CODEC or DAC audio output. Purely board/audio-path
+/// wiring - nothing Bluetooth-protocol-specific lives here anymore.
+void initializeAudioOutput()
 {
 #ifdef AUDIOKIT
 	minimalPins.addI2C(PinFunction::CODEC, 32, 33);
@@ -508,292 +308,5 @@ void initializeA2DPSink()
 	cfg.i2s_format = I2S_LSB_FORMAT;
 	i2s.begin(cfg);
 #endif
-
-	a2dp_sink.set_auto_reconnect(true, 10000);
-	a2dp_sink.set_on_connection_state_changed(connectionStateChanged);
-	a2dp_sink.set_on_audio_state_changed(audioStateChanged);
-	a2dp_sink.set_avrc_connection_state_callback(avrc_connection_state_callback);
-	a2dp_sink.set_avrc_metadata_callback(avrc_metadata_callback);
-	a2dp_sink.set_avrc_metadata_attribute_mask(ESP_AVRC_MD_ATTR_TITLE | ESP_AVRC_MD_ATTR_ARTIST |
-											   ESP_AVRC_MD_ATTR_ALBUM | ESP_AVRC_MD_ATTR_PLAYING_TIME |
-												ESP_AVRC_MD_ATTR_TRACK_NUM | ESP_AVRC_MD_ATTR_NUM_TRACKS);
-	a2dp_sink.set_avrc_rn_play_pos_callback(avrc_rn_play_pos_callback, 1);
-#ifdef ZERO_VOLUME_FIX
-	a2dp_sink.set_avrc_rn_volumechange(avrc_rn_volumechange_callback);
-	a2dp_sink.set_avrc_rn_volumechange_completed(avrc_rn_volumechange_completed_callback);
-#endif
-#if defined(TRACK_POSITION_FIX)
-	a2dp_sink.set_stream_reader(read_data_stream, false);
-#endif
-#ifdef TRACK_CHANGE_CALLBACK
-	a2dp_sink.set_avrc_rn_track_change_callback(avrc_rn_track_change_callback);
-#endif
-	a2dp_sink.start(A2DP_SINK_NAME);
-
-	ESP_LOGI("SETUP", "a2dp_sink started: %s", A2DP_SINK_NAME);
-	platform::delay_ms(500);
-	a2dp_sink.set_discoverability(ESP_BT_GENERAL_DISCOVERABLE);
 }
-
-/// @brief Initializes the AVRC metadata queue, and attempts to start the
-/// related task
-/// @return ESP_FAIL if the queue or task could not be created, ESP_OK otherwise
-esp_err_t initializeAVRCTask()
-{
-	avrcMetadataQueue = xQueueCreate(AVRC_QUEUE_SIZE, sizeof(avrcMetadata));
-	if (avrcMetadataQueue == nullptr)
-	{
-		ESP_LOGE("SETUP", "Failed to create metadata queue");
-		return ESP_FAIL;
-	}
-
-	xTaskCreatePinnedToCore(processAVRCTask, "processAVRCTask", PROCESS_AVRC_TASK_STACK_SIZE, NULL,
-							PROCESS_AVRC_TASK_PRIORITY, &processAVRCTaskHandle, ARDUINO_RUNNING_CORE);
-	if (processAVRCTaskHandle == nullptr)
-	{
-		ESP_LOGE("SETUP", "Failed to create processAVRCTask");
-		return ESP_FAIL;
-	}
-
-	return ESP_OK;
-}
-#pragma endregion
-
-volatile esp_a2d_connection_state_t connection_state;
-
-#pragma region A2DP/AVRC callbacks Definitions
-/// @brief Callback on changes of A2DP connection and AVRCP connection. On
-/// disconnect the esPod becomes silent.
-/// @param state New state passed by the callback.
-/// @param ptr Not used.
-void connectionStateChanged(esp_a2d_connection_state_t state, void *ptr)
-{
-	switch (state)
-	{
-	case ESP_A2D_CONNECTION_STATE_CONNECTING:
-	   connection_state = state;
-		ESP_LOGI("A2DP_CB", "ESP_A2D_CONNECTION_STATE_CONNECTING");
-		break;
-	case ESP_A2D_CONNECTION_STATE_CONNECTED:
-		connection_state = state;
-		ESP_LOGI("A2DP_CB", "ESP_A2D_CONNECTION_STATE_CONNECTED, espod enabled");
-		espod.disabled = false;
-#ifdef LED_BUILTIN
-		platform::gpio_write(LED_BUILTIN, INVERT_LED_LOGIC(platform::PinLevel::High));
-#endif
-#ifdef ZERO_VOLUME_FIX
-		volume_state = VOLUME_AFTER_CONNECTION_NOT_DEFINED;
-#endif
-		break;
-	case ESP_A2D_CONNECTION_STATE_DISCONNECTED:
-		ESP_LOGI("A2DP_CB", "ESP_A2D_CONNECTION_STATE_DISCONNECTED, espod disabled");
-		espod.resetState();
-		espod.disabled = true;
-#ifdef LED_BUILTIN
-		platform::gpio_write(LED_BUILTIN, INVERT_LED_LOGIC(platform::PinLevel::Low));
-#endif
-		if (connection_state == ESP_A2D_CONNECTION_STATE_CONNECTING) // no connected state -> reconnect
-		{
-			a2dp_sink.reconnect();
-		}
-		connection_state = state;
-		break;
-	}
-#ifdef ENABLE_ACTIVE_DCD
-	platform::gpio_write(DCD_CTRL_PIN, INVERT_DCD_LOGIC(espod.disabled ? platform::PinLevel::High : platform::PinLevel::Low)); // Logic inversion by MACRO
-#endif
-}
-
-/// @brief Callback for the change of playstate after connection. Aligns the
-/// state of the esPod to the state of the phone. Play should be called by the
-/// espod interaction
-/// @param state The A2DP Stream to align to.
-/// @param ptr Not used.
-void audioStateChanged(esp_a2d_audio_state_t state, void *ptr)
-{
-	switch (state)
-	{
-	case ESP_A2D_AUDIO_STATE_STARTED:
-#ifdef ZERO_VOLUME_FIX
-		if (volume_state == VOLUME_AFTER_CONNECTION_NOT_DEFINED) {
-			volume_state = VOLUME_AFTER_CONNECTION_SET;
-			ESP_LOGI("MAIN", "Volume is not set after connecting. Restore volume to saved value");
-			a2dp_sink.set_volume(nvs_get_volume());
-		}
-#endif
-		espod.playStatus = PB_STATE_PLAYING;
-		ESP_LOGI("A2DP_CB", "ESP_A2D_AUDIO_STATE_STARTED, espod.playStatus = PB_STATE_PLAYING");
-		break;
-	case ESP_A2D_AUDIO_STATE_SUSPEND:
-		espod.playStatus = PB_STATE_PAUSED;
-		ESP_LOGI("A2DP_CB", "ESP_A2D_AUDIO_STATE_REMOTE_SUSPEND, espod.playStatus = PB_STATE_PAUSED");
-#ifdef ZERO_VOLUME_FIX
-		nvs_set_volume(a2dp_sink.get_volume());
-#endif
-		break;
-	}
-
-#ifdef TRACK_POSITION_FIX
-	if (state == ESP_A2D_AUDIO_STATE_STARTED) {
-		espod.is_playing = true;
-	} 
-	else if (state == ESP_A2D_AUDIO_STATE_STOPPED) {
-		espod.is_playing = false;
-		if (espod.playStatus != PB_STATE_PAUSED) {
-			espod.rawAudioDataBytesReceived = 0; // Reset counter if stopped completely
-		}
-	}
-	else { // ESP_A2D_AUDIO_STATE_REMOTE_SUSPEND (Paused)
-		espod.is_playing = false;
-	}
-#endif
-}
-
-
-/// @brief a callback method which provides connection state of AVRC service
-/// @param connected 
-void avrc_connection_state_callback(bool connected)
-{
-	if (connected)
-	{
-		ESP_LOGD("AVRC_CB", "Connection state: connected");
-#ifdef AUTOPLAY_AFTER_CONNECT 
-		a2dp_sink.play();
-#endif
-	}
-	else
-	{
-		ESP_LOGD("AVRC_CB", "Connection state: disconnected");
-	}
-}
-
-#ifdef ZERO_VOLUME_FIX
-
-/// @brief 
-/// @param volume 
-void avrc_rn_volumechange_callback(int volume)
-{
-	ESP_LOGD("AVRC_CB", "Volume change: %d%%", (int)volume * 100 / 0x7f);
-	if (volume_state == VOLUME_AFTER_CONNECTION_NOT_DEFINED)
-	{
-		volume_state = VOLUME_AFTER_CONNECTION_SET;
-		if (volume == 0)
-		{
-			uint8_t saved_volume = nvs_get_volume();
-			if (volume != saved_volume)
-			{
-				ESP_LOGI("MAIN", "Volume is set to 0 after connecting. Restore volume to saved value");
-				a2dp_sink.set_volume(saved_volume);
-			}
-		}
-	}
-}
-
-/// @brief 
-/// @param volume 
-void avrc_rn_volumechange_completed_callback(int volume)
-{
-	ESP_LOGD("AVRC_CB", "Volume change completed: %d%%", (int)volume * 100 / 0x7f);
-}
-
-#endif
-
-/// @brief Play position callback returning the ms spent since start on every
-/// interval - normally 1s
-/// @param play_pos Playing Position in ms
-void avrc_rn_play_pos_callback(uint32_t play_pos)
-{
-	ESP_LOGI("AVRC_CB", "PlayPosition called");
-	espod.playPosition = play_pos;
-#ifndef STATUS_NOTIFICATION_QUEUE
-	if (espod.playStatusNotificationState == NOTIF_ON && espod.trackChangeAckPending == 0x00)
-	{
-		// espod.L0x04_0x27_PlayStatusNotification(0x04, play_pos);
-		L0x04::_0x27_PlayStatusNotification(&espod, 0x04, play_pos);
-	}
-#endif
-}
-
-/// @brief Catch callback for the AVRC metadata. There can be duplicates !
-/// @param id Metadata attribute ID : ESP_AVRC_MD_ATTR_xxx
-/// @param text Text data passed around, sometimes it's a uint32_t disguised as
-/// text
-void avrc_metadata_callback(uint8_t id, const uint8_t *text)
-{
-	avrcMetadata incMetadata;
-	incMetadata.id = id;
-	incMetadata.payload = new uint8_t[255];
-	memcpy(incMetadata.payload, text, 255);
-	if (xQueueSend(avrcMetadataQueue, &incMetadata, 0) != pdTRUE)
-	{
-		ESP_LOGW("AVRC_CB", "Metadata queue full, discarding metadata");
-		delete[] incMetadata.payload;
-		incMetadata.payload = nullptr;
-	}
-}
-
-#if defined(TRACK_POSITION_FIX)
-/// @brief Data stream reader callback
-/// @param data Data buffer to pass to the I2S
-/// @param length Length of the data buffer
-void read_data_stream(const uint8_t *data, uint32_t length)
-{
-#ifndef AUDIOKIT
-	i2s.write(data, length);
-#endif
-#ifdef TRACK_POSITION_FIX
-	// Only count bytes if audio is actively flowing
-  if (espod.is_playing) {
-    espod.rawAudioDataBytesReceived += length;
-  }
-#endif
-}
-#endif
-
-#ifdef TRACK_CHANGE_CALLBACK
-void avrc_rn_track_change_callback(uint8_t *uid)
-{
-    ESP_LOGI("A2DP_CB",
-             "Track UID: %02X%02X%02X%02X%02X%02X%02X%02X",
-             uid[0], uid[1], uid[2], uid[3],
-             uid[4], uid[5], uid[6], uid[7]);
-}
-#endif
-
-/// @brief Callback function that passes intended playback operations from the
-/// esPod to the A2DP player (i.e. the phone)
-/// @param playCommand A2DP_xx command instruction. It does not match the
-/// PB_CMD_xx codes !!!
-void playStatusHandler(byte playCommand)
-{
-	switch (playCommand)
-	{
-	case A2DP_STOP:
-		a2dp_sink.stop();
-		ESP_LOGI("A2DP_CB", "A2DP_STOP");
-		break;
-	case A2DP_PLAY:
-		espod.currentTrackIndex = 1;
-		a2dp_sink.play();
-		ESP_LOGI("A2DP_CB", "A2DP_PLAY");
-		break;
-	case A2DP_PAUSE:
-		a2dp_sink.pause();
-		ESP_LOGI("A2DP_CB", "A2DP_PAUSE");
-		break;
-	case A2DP_REWIND:
-		a2dp_sink.previous();
-		ESP_LOGI("A2DP_CB", "A2DP_REWIND");
-		break;
-	case A2DP_NEXT:
-		a2dp_sink.next();
-		ESP_LOGI("A2DP_CB", "A2DP_NEXT");
-		break;
-	case A2DP_PREV:
-		a2dp_sink.previous();
-		ESP_LOGI("A2DP_CB", "A2DP_PREV");
-		break;
-	}
-}
-
 #pragma endregion

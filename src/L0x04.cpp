@@ -326,10 +326,8 @@ void L0x04::processLingo(esPod *esp, const byte *byteArray, uint32_t len)
             if (esp->playStatus != PB_STATE_PLAYING)
             {
                 esp->playStatus = PB_STATE_PLAYING; // Playing status forced
-                if (esp->_playStatusHandler)
-                {
-                    esp->_playStatusHandler(A2DP_PLAY); // Send play to the a2dp
-                }
+                if (esp->_btSource)
+                        esp->_btSource->play(); // Send play to the a2dp
             }
 
 #if TOTAL_NUM_TRACKS == 3
@@ -388,20 +386,17 @@ void L0x04::processLingo(esPod *esp, const byte *byteArray, uint32_t len)
             if (tempTrackIndex < esp->currentTrackIndex)
             {
                 // todo double A2DP_PREV
-                if (esp->_playStatusHandler)
-                    esp->_playStatusHandler(A2DP_PREV); // Fire the metadata trigger indirectly
+                if (esp->_btSource)
+                        esp->_btSource->previous(); // Fire the metadata trigger indirectly
                 // if (esp->getPlayPosition() < 3000) {
                 //     esp->_playStatusHandler(A2DP_PREV); // Fire the metadata trigger indirectly
                 // }
             }
             else if (tempTrackIndex > esp->currentTrackIndex)
             {
-                if (esp->_playStatusHandler)
-                    esp->_playStatusHandler(A2DP_NEXT); // Fire the metadata trigger indirectly
+                if (esp->_btSource)
+                        esp->_btSource->next(); // Fire the metadata trigger indirectly
             }
-#ifdef TRACK_POSITION_FIX
-            esp->rawAudioDataBytesReceived = 0;
-#endif
 
 #ifndef NO_STATUS_STOP            
             L0x04::_0x27_PlayStatusNotification(esp, 0x00);
@@ -481,8 +476,8 @@ void L0x04::processLingo(esPod *esp, const byte *byteArray, uint32_t len)
                 if (esp->playStatus == PB_STATE_PLAYING)
                 {
                     esp->playStatus = PB_STATE_PAUSED; // Toggle to paused if playing
-                    if (esp->_playStatusHandler)
-                        esp->_playStatusHandler(A2DP_PAUSE);
+                    if (esp->_btSource)
+                        esp->_btSource->pause();
                 }
                 else
                 {
@@ -490,8 +485,8 @@ void L0x04::processLingo(esPod *esp, const byte *byteArray, uint32_t len)
                     esp->currentTrackIndex = START_INDEX;
 #endif
                     esp->playStatus = PB_STATE_PLAYING; // Switch to playing in any other case
-                    if (esp->_playStatusHandler)
-                        esp->_playStatusHandler(A2DP_PLAY);
+                    if (esp->_btSource)
+                        esp->_btSource->play();
                 }
                 L0x04::_0x01_iPodAck(esp, iPodAck_OK, cmdID);
             }
@@ -499,8 +494,8 @@ void L0x04::processLingo(esPod *esp, const byte *byteArray, uint32_t len)
             case PB_CMD_STOP: // Stop
             {
                 esp->playStatus = PB_STATE_STOPPED;
-                if (esp->_playStatusHandler)
-                    esp->_playStatusHandler(A2DP_STOP);
+                if (esp->_btSource)
+                        esp->_btSource->stop();
                 L0x04::_0x01_iPodAck(esp, iPodAck_OK, cmdID);
             }
             break;
@@ -519,8 +514,8 @@ void L0x04::processLingo(esPod *esp, const byte *byteArray, uint32_t len)
                 L0x04::_0x01_iPodAck(esp, iPodAck_CmdPending, cmdID, TRACK_CHANGE_TIMEOUT);
 
                 // Fire the A2DP when ready
-                if (esp->_playStatusHandler)
-                    esp->_playStatusHandler(A2DP_NEXT); // Fire the metadata trigger indirectly
+                if (esp->_btSource)
+                        esp->_btSource->next(); // Fire the metadata trigger indirectly
 
 #if TOTAL_NUM_TRACKS == 3
                 if (esp->playStatusNotificationState == NOTIF_ON) {
@@ -539,11 +534,8 @@ void L0x04::processLingo(esPod *esp, const byte *byteArray, uint32_t len)
                 ESP_LOGD(IPOD_TAG, "Current index %d Tracklist pos. %d --> EXPLICIT SINGLE PREV TRACK", esp->currentTrackIndex, esp->trackListPosition);
                 L0x04::_0x01_iPodAck(esp, iPodAck_OK, cmdID);
                 // Fire the A2DP when ready
-                if (esp->_playStatusHandler)
-                    esp->_playStatusHandler(A2DP_PREV); // Fire the metadata trigger indirectly
-#ifdef TRACK_POSITION_FIX
-                esp->rawAudioDataBytesReceived = 0;
-#endif
+                if (esp->_btSource)
+                    esp->_btSource->previous(); // Fire the metadata trigger indirectly
             }
             break;
             case PB_CMD_PLAY: // Play... do we need to have an ack pending ?
@@ -555,16 +547,16 @@ void L0x04::processLingo(esPod *esp, const byte *byteArray, uint32_t len)
                 esp->trackChangeTimestamp = platform::time_now_ms();
                 L0x04::_0x01_iPodAck(esp, iPodAck_CmdPending, cmdID, TRACK_CHANGE_TIMEOUT);
 
-                if (esp->_playStatusHandler)
-                    esp->_playStatusHandler(A2DP_PLAY);
+                if (esp->_btSource)
+                        esp->_btSource->play();
             }
             break;
             case PB_CMD_PAUSE: // Pause
             {
                 esp->playStatus = PB_STATE_PAUSED;
                 L0x04::_0x01_iPodAck(esp, iPodAck_OK, cmdID);
-                if (esp->_playStatusHandler)
-                    esp->_playStatusHandler(A2DP_PAUSE);
+                if (esp->_btSource)
+                        esp->_btSource->pause();
             }
             break;
             }

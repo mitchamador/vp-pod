@@ -85,10 +85,8 @@ void L0x03::processLingo(esPod *esp, const byte *byteArray, uint32_t len)
         if (esp->playStatus != PB_STATE_PLAYING)
         {
             esp->playStatus = PB_STATE_PLAYING; // Playing status forced
-            if (esp->_playStatusHandler)
-            {
-                esp->_playStatusHandler(A2DP_PLAY); // Send play to the a2dp
-            }
+            if (esp->_btSource)
+                esp->_btSource->play(); // Send play to the a2dp
         }
 #if TOTAL_NUM_TRACKS == 3
         if (tempTrackIndex == (esp->currentTrackIndex + TOTAL_NUM_TRACKS - 1) % TOTAL_NUM_TRACKS) // Desired trackIndex is the left entry
@@ -109,8 +107,8 @@ void L0x03::processLingo(esPod *esp, const byte *byteArray, uint32_t len)
             L0x03::_0x00_iPodAck(esp, iPodAck_CmdPending, cmdID, TRACK_CHANGE_TIMEOUT);
 
             // Fire the A2DP when ready
-            if (esp->_playStatusHandler)
-                esp->_playStatusHandler(A2DP_PREV); // Fire the metadata trigger indirectly
+            if (esp->_btSource)
+                esp->_btSource->previous(); // Fire the metadata trigger indirectly
         }
         else if (tempTrackIndex == esp->currentTrackIndex) // Somehow reselecting the current track
         {
@@ -118,8 +116,8 @@ void L0x03::processLingo(esPod *esp, const byte *byteArray, uint32_t len)
             L0x03::_0x00_iPodAck(esp, iPodAck_OK, cmdID);
 
             // Fire the A2DP when ready
-            if (esp->_playStatusHandler)
-                esp->_playStatusHandler(A2DP_PREV); // Fire the metadata trigger indirectly
+            if (esp->_btSource)
+                esp->_btSource->previous(); // Fire the metadata trigger indirectly
         }
         else // If it is not the previous or the current track, it automatically becomes a next track
         {
@@ -137,8 +135,8 @@ void L0x03::processLingo(esPod *esp, const byte *byteArray, uint32_t len)
             L0x03::_0x00_iPodAck(esp, iPodAck_CmdPending, cmdID, TRACK_CHANGE_TIMEOUT);
 
             // Fire the A2DP when ready
-            if (esp->_playStatusHandler)
-                esp->_playStatusHandler(A2DP_NEXT); // Fire the metadata trigger indirectly
+            if (esp->_btSource)
+                esp->_btSource->next(); // Fire the metadata trigger indirectly
         }
     }
     break;
