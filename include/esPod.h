@@ -1,9 +1,21 @@
 #pragma once
+
+#ifdef ARDUINO
 #include "Arduino.h"
+#else
+#include "esp_log.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#include <stdint.h>
+#include "esp_types.h"
+typedef uint8_t byte;
+#endif
+
+#include "esPod_conf.h"
+
 #include "L0x00.h"
 #include "L0x03.h"
 #include "L0x04.h"
-#include "esPod_conf.h"
 #include "esPod_utils.h"
 #include "IUart.h"
 #include "platform.h"
@@ -174,7 +186,8 @@ public:
     uint32_t getPlayPosition();
 
     // IBluetoothSourceEvents - called by the attached Bluetooth backend
-    void onConnectionStateChanged(BtConnectionState state, const char *peerName) override;
+    void onConnectionStateChanged(BtConnectionState state) override;
+    void onPeerNameChanged(const char *peerName) override;
     void onPlayStateChanged(BtPlayState state) override;
     void onTrackMetadata(const TrackMetadata &metadata, byte direction) override;
     void onPlayPosition(uint32_t positionMs) override;

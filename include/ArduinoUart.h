@@ -1,5 +1,6 @@
 #pragma once
 
+#ifdef ARDUINO
 #include <Stream.h>
 #include "IUart.h"
 
@@ -15,3 +16,4 @@ public:
 private:
     Stream &_stream;
 };
+#endif

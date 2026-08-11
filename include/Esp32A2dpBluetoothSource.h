@@ -1,11 +1,13 @@
 #pragma once
 
+#ifdef ARDUINO
 #include "AudioTools.h"
 #include "BluetoothA2DPSink.h"
 
 #include "esPod_conf.h" // TRACK_POSITION_FIX / ZERO_VOLUME_FIX / TRACK_CHANGE_CALLBACK / USE_PEER_NAME
 #include "IBluetoothPlaybackSource.h"
 #include "IBluetoothSourceEvents.h"
+#include "IAudioOutput.h"
 
 /// @brief Bluetooth backend built on top of the ESP32-A2DP library
 /// (BluetoothA2DPSink). Owns everything that is specific to that library:
@@ -21,11 +23,16 @@ public:
     /// @param a2dpSink The (already constructed, but not yet begin()'d)
     /// BluetoothA2DPSink instance. Its output stream (I2S/codec) is board-
     /// specific wiring and stays owned by main.cpp, same as before.
-    /// @param rawOutputStream Only needed on boards where the A2DP sink's
-    /// own output isn't used directly and audio is instead written manually
+    /// @param audioOutput Only needed on boards where the A2DP sink's own
+    /// output isn't used directly and audio is instead written manually
     /// from the raw stream-reader callback (non-AUDIOKIT boards, see
     /// original read_data_stream()). Pass nullptr if not applicable.
-    explicit Esp32A2dpBluetoothSource(BluetoothA2DPSink &a2dpSink, AudioStream *rawOutputStream = nullptr);
+    /// NOTE: unlike NativeA2dpBluetoothSource, this only calls
+    /// audioOutput->begin() once at startup with a fixed 44100/16/2 -
+    /// BluetoothA2DPSink doesn't expose a codec-change callback on this
+    /// code path (AUDIOKIT boards reconfigure their I2SCodecStream
+    /// internally instead and don't go through this parameter at all).
+    explicit Esp32A2dpBluetoothSource(BluetoothA2DPSink &a2dpSink, IAudioOutput *audioOutput = nullptr);
 
     void begin(const char *deviceName) override;
     void setEventSink(IBluetoothSourceEvents &sink) override { _sink = &sink; }
@@ -41,7 +48,7 @@ public:
 
 private:
     BluetoothA2DPSink &_a2dp;
-    AudioStream *_rawOutputStream = nullptr;
+    IAudioOutput *_audioOutput = nullptr;
     IBluetoothSourceEvents *_sink = nullptr;
 
     // Only one instance is expected to exist (ESP32-A2DP callbacks are
@@ -114,3 +121,5 @@ private:
     static void _avrcTrackChangeTrampoline(uint8_t *uid);
 #endif
 };
+
+#endif

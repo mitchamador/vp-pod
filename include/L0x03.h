@@ -1,6 +1,7 @@
 #pragma once
-#include "Arduino.h"
+
 #include "esPod_utils.h"
+
 class esPod;
 
 #define L0x03_GetCurrentEQProfileIndex 0x01

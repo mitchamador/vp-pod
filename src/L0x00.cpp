@@ -1,6 +1,5 @@
-#include "Arduino.h"
-#include "L0x00.h"
 #include "esPod.h"
+#include "L0x00.h"
 
 /// @brief
 /// @param esp Pointer to the esPod instance

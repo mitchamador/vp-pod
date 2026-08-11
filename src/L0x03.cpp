@@ -1,6 +1,5 @@
-#include "Arduino.h"
-#include "L0x03.h"
 #include "esPod.h"
+#include "L0x03.h"
 
 void L0x03::processLingo(esPod *esp, const byte *byteArray, uint32_t len)
 {
@@ -103,7 +102,11 @@ void L0x03::processLingo(esPod *esp, const byte *byteArray, uint32_t len)
             // Engage the pending ACK for expected metadata
             esp->trackChangeAckPending = cmdID;
             esp->trackChangeTimestamp = platform::time_now_ms();
+#if TOTAL_NUM_TRACKS == 3
+            ESP_LOGD(IPOD_TAG, "New index %d Pending Meta %d Timestamp: %d --> PREV ", esp->currentTrackIndex, (esp->trackChangeAckPending > 0x00), esp->trackChangeTimestamp);
+#else
             ESP_LOGD(IPOD_TAG, "Prev. index %d New index %d Tracklist pos. %d Pending Meta %d Timestamp: %d --> PREV ", esp->prevTrackIndex, esp->currentTrackIndex, esp->trackListPosition, (esp->trackChangeAckPending > 0x00), esp->trackChangeTimestamp);
+#endif
             L0x03::_0x00_iPodAck(esp, iPodAck_CmdPending, cmdID, TRACK_CHANGE_TIMEOUT);
 
             // Fire the A2DP when ready
@@ -131,7 +134,11 @@ void L0x03::processLingo(esPod *esp, const byte *byteArray, uint32_t len)
             // Engage the pending ACK for expected metadata
             esp->trackChangeAckPending = cmdID;
             esp->trackChangeTimestamp = platform::time_now_ms();
+#if TOTAL_NUM_TRACKS == 3
+            ESP_LOGD(IPOD_TAG, "New index %d Pending Meta %d Timestamp: %d --> NEXT ", esp->currentTrackIndex, (esp->trackChangeAckPending > 0x00), esp->trackChangeTimestamp);
+#else
             ESP_LOGD(IPOD_TAG, "Prev. index %d New index %d Tracklist pos. %d Pending Meta %d Timestamp: %d --> NEXT ", esp->prevTrackIndex, esp->currentTrackIndex, esp->trackListPosition, (esp->trackChangeAckPending > 0x00), esp->trackChangeTimestamp);
+#endif
             L0x03::_0x00_iPodAck(esp, iPodAck_CmdPending, cmdID, TRACK_CHANGE_TIMEOUT);
 
             // Fire the A2DP when ready

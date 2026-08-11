@@ -1,0 +1,20 @@
+BasedOnStyle: WebKit
+IndentWidth: 4
+PointerAlignment: Right
+SpaceBeforeParens: ControlStatements
+IndentCaseLabels: true
+ConstructorInitializerIndentWidth: 4
+BreakConstructorInitializers: BeforeColon
+PackConstructorInitializers: BinPack
+ColumnLimit: 120
+AlignEscapedNewlines: Right
+ReflowComments: true
+Cpp11BracedListStyle: true
+#BreakBeforeBraces: Attach
+BreakBeforeBraces: Custom
+BraceWrapping:
+  AfterFunction: true
+  AfterControlStatement: false
+  AfterStruct: false
+  AfterClass: false
+  BeforeElse: false

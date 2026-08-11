@@ -1,3 +1,4 @@
+#if defined(ARDUINO) && defined(USE_SD)
 #include <sdLogUpdate.h>
 
 #ifdef TAG
@@ -148,3 +149,4 @@ void updateFromFS(fs::FS &fs)
         ESP_LOGI(TAG, "No update.bin file found");
     }
 }
+#endif

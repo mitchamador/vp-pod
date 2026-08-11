@@ -1,3 +1,8 @@
 .vscode/
 .pio/
 logs/
+managed_components/
+dependencies.lock
+sdkconfig*
+!sdkconfig.defaults
+CMakeLists.txt

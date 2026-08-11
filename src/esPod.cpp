@@ -683,7 +683,7 @@ uint32_t esPod::getPlayPosition() {
 //-----------------------------------------------------------------------
 //|                    IBluetoothSourceEvents impl                      |
 //-----------------------------------------------------------------------
-void esPod::onConnectionStateChanged(BtConnectionState state, const char *peerName)
+void esPod::onConnectionStateChanged(BtConnectionState state)
 {
     switch (state)
     {
@@ -692,10 +692,6 @@ void esPod::onConnectionStateChanged(BtConnectionState state, const char *peerNa
     case BtConnectionState::Connected:
         ESP_LOGI(IPOD_TAG, "Bluetooth connected, espod enabled");
         disabled = false;
-#ifdef USE_PEER_NAME
-        _peer_name = peerName;
-        ESP_LOGI(IPOD_TAG, "Peer connected: %s", _peer_name ? _peer_name : "?");
-#endif
         break;
     case BtConnectionState::Disconnected:
         ESP_LOGI(IPOD_TAG, "Bluetooth disconnected, espod disabled");
@@ -705,9 +701,17 @@ void esPod::onConnectionStateChanged(BtConnectionState state, const char *peerNa
     }
 }
 
+void esPod::onPeerNameChanged(const char *peerName)
+{
+#ifdef USE_PEER_NAME
+    _peer_name = peerName;
+    ESP_LOGI(IPOD_TAG, "Peer connected: %s", peerName);
+#endif
+}
+
 void esPod::onPlayStateChanged(BtPlayState state)
 {
-    playStatus = (state == BtPlayState::Playing) ? PB_STATE_PLAYING : PB_STATE_PAUSED;
+    playStatus = (state == BtPlayState::Playing && !disabled) ? PB_STATE_PLAYING : PB_STATE_PAUSED;
     ESP_LOGI(IPOD_TAG, "Bluetooth play state changed, playStatus = %d", playStatus);
 }
 
@@ -745,7 +749,7 @@ void esPod::_applyTrackMetadata(const TrackMetadata *pending, byte direction)
             ESP_LOGD("AVRC_CB",
                      "Artist+Album+Title+Duration +++ ACK Pending "
                      "0x%x\n\tPending duration: %d",
-                     espod.trackChangeAckPending, platform::millis() - espod.trackChangeTimestamp);
+                     trackChangeAckPending, platform::time_now_ms() - trackChangeTimestamp);
             // espod.L0x04_0x01_iPodAck(iPodAck_OK, espod.trackChangeAckPending);
             if (trackChangeAckPending == 0x11)
             {

@@ -1,5 +1,6 @@
 #pragma once
 
+#if defined(ARDUINO) && defined(USE_SD)
 #include <Arduino.h>
 #include <Update.h>
 #include <FS.h>
@@ -30,3 +31,4 @@ bool initSD();
 /// @brief Looks for a "/update.bin" file on the SD card and updates the system automatically
 /// @param fs SD_MMC or SD if it has been successfully mounted
 void updateFromFS(fs::FS &fs);
+#endif

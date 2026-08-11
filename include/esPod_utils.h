@@ -1,5 +1,8 @@
 #pragma once
-#include "Arduino.h"
+
+#include <stdint.h>
+typedef uint8_t byte;
+
 #include "esPod_conf.h"
 
 // // Possible values for L0x00 0x02 iPodAck

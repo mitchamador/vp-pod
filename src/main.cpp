@@ -1,10 +1,15 @@
-#include <Arduino.h>
-
+#include "esPod.h"
+#ifdef ARDUINO
 #include "AudioTools.h"
 #include "BluetoothA2DPSink.h"
-
-#include "esPod.h"
 #include "Esp32A2dpBluetoothSource.h"
+#include "Esp32I2sAudioOutput.h"
+#else
+#include "nvs_flash.h"
+#include "NativeA2dpBluetoothSink.h"
+#include "NativeA2dpBluetoothSource.h"
+#include "NativeI2sAudioOutput.h"
+#endif
 
 #ifdef USE_SD
 #include "sdLogUpdate.h"
@@ -79,19 +84,33 @@ BluetoothA2DPSink a2dp_sink(i2s);
 #define UART1_RST 13
 #endif
 
+#ifdef ARDUINO
 I2SStream i2s;
-
-BluetoothA2DPSink a2dp_sink;
+Esp32I2sAudioOutput audioOutput(i2s, 27, 25, 26); // bck, ws, data - see old initializeAudioOutput() pin values
+#else
+NativeI2sAudioOutput audioOutput(I2S_NUM_0, 27, 25, 26);
+#endif
 
 #endif
 
+#ifdef ARDUINO
+BluetoothA2DPSink a2dp_sink;
+#else
+NativeA2DPSink a2dp_sink;
+#endif
+
+
 // On AUDIOKIT boards a2dp_sink already writes into i2s directly, so the
-// backend doesn't need a raw output stream (nullptr). On other boards the
-// backend writes into i2s manually from its raw stream-reader callback.
+// backend doesn't need a separate IAudioOutput (nullptr). On other boards
+// the backend writes into it manually from its raw stream-reader callback.
 #ifdef AUDIOKIT
 Esp32A2dpBluetoothSource btSource(a2dp_sink);
 #else
-Esp32A2dpBluetoothSource btSource(a2dp_sink, &i2s);
+#ifdef ARDUINO
+Esp32A2dpBluetoothSource btSource(a2dp_sink, &audioOutput);
+#else
+NativeA2dpBluetoothSource btSource(a2dp_sink, &audioOutput);
+#endif
 #endif
 
 #pragma endregion
@@ -114,10 +133,16 @@ ArduinoUart uart(ipodSerial);
 #else
 
 #include "EspIdfUart.h"
+// Pins/baud rate are configured right here, synchronously, in the
+// constructor - not deferred to initializeSerial() later in setup(). esPod
+// (declared right below) spawns an RX task from its own constructor, and
+// that task starts calling uart.available() immediately; deferring the
+// actual uart_driver_install() to later in setup() raced against it and
+// produced a stream of "uart driver error" log spam until setup() caught up.
 #ifdef USE_SERIAL_0
-EspIdfUart uart(UART_NUM_0);
+EspIdfUart uart(UART_NUM_0, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE, IPOD_SERIAL_BAUDRATE);
 #elifdef USE_SERIAL_1
-EspIdfUart uart(UART_NUM_1);
+EspIdfUart uart(UART_NUM_1, UART1_RX, UART1_TX, IPOD_SERIAL_BAUDRATE);
 #else
 #error "Unknown serial"
 #endif
@@ -132,7 +157,36 @@ esPod espod(uart);
 void initializeSDCard();
 void initializeSerial();
 void initializeAudioOutput();
+void initializeNvs();
 #pragma endregion
+
+#ifndef ARDUINO
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+
+void setup();
+void loop();
+
+void arduinoTask(void *pvParameters) {
+	setup();
+	while (1) {
+		loop();
+		vTaskDelay(pdMS_TO_TICKS(1)); 
+	}
+}
+
+extern "C" void app_main() {
+    xTaskCreatePinnedToCore(
+        arduinoTask,
+        "ArduinoTask",
+        8192,
+        NULL,
+        5,
+        NULL,
+        1
+    );
+}
+#endif
 
 void setup()
 {
@@ -156,8 +210,9 @@ void setup()
 	platform::gpio_write(DCD_CTRL_PIN, INVERT_DCD_LOGIC(platform::PinLevel::High)); // Logic is inverted
 #endif
 
+#ifdef ARDUINO
 	esp_log_level_set("*", ESP_LOG_NONE);
-	ESP_LOGI("SETUP", "setup() start");
+#endif
 
 	initializeSDCard();
 
@@ -175,7 +230,10 @@ void setup()
 
 	initializeAudioOutput();
 
+	initializeNvs();
+
 	espod.attachPlaybackSource(btSource);
+
 	btSource.begin(A2DP_SINK_NAME);
 
 #ifdef UART1_RST // Re-enable the UART1 transceiver if available
@@ -183,17 +241,18 @@ void setup()
 #endif
 	initializeSerial();
 
-	ESP_LOGI("SETUP", "Setup finished");
+	ESP_LOGI("SETUP", "setup() finished");
 }
 
 void loop()
 {
+
 #ifdef RESET_STATE_KEY
 	
-	uint32_t start_key_pressed = 0;
-	bool clean_last_connection;
+	static uint32_t start_key_pressed = 0;
+	static bool clean_last_connection;
 	
-	if (digitalRead(RESET_STATE_KEY) == 0)
+	if (platform::gpio_read(RESET_STATE_KEY) == platform::PinLevel::Low)
 	{
 		if (start_key_pressed != 0) {
 			if (!clean_last_connection && platform::time_now_ms() - start_key_pressed > 10000)
@@ -216,7 +275,7 @@ void loop()
 #endif
 
 #ifdef LED_BUILTIN
-	platform::gpio_write(LED_BUILTIN, INVERT_LED_LOGIC(espod.disabled ? platform::PinLevel::Low : platform::PinLevel::High));
+  	platform::gpio_write(LED_BUILTIN, INVERT_LED_LOGIC(espod.disabled ? platform::PinLevel::Low : platform::PinLevel::High));
 #endif
 #ifdef ENABLE_ACTIVE_DCD
 	platform::gpio_write(DCD_CTRL_PIN, INVERT_DCD_LOGIC(espod.disabled ? platform::PinLevel::High : platform::PinLevel::Low));
@@ -245,47 +304,19 @@ void initializeSDCard()
 #endif
 }
 
-/// @brief Sets up and starts the appropriate Serial interface
+/// @brief Sets up and starts the appropriate Serial interface. Only needed
+/// for the Arduino/HardwareSerial path - the ESP-IDF UART path is fully set
+/// up already, synchronously, in the EspIdfUart constructor (see the "Serial
+/// Initialization" region above and its comment for why).
 void initializeSerial()
 {
 #if defined(ARDUINO) && !defined(USE_ESP_IDF_SERIAL)
-#ifndef IPOD_SERIAL_BAUDRATE
-#define IPOD_SERIAL_BAUDRATE 19200
-#endif
 #if defined(USE_SERIAL_1) || defined(USE_ALT_SERIAL) // If Alt Serial or Serial 1 is used
 	ipodSerial.setPins(UART1_RX, UART1_TX);
 #endif
 	ipodSerial.setRxBufferSize(1024);
 	ipodSerial.setTxBufferSize(1024);
 	ipodSerial.begin(IPOD_SERIAL_BAUDRATE);
-#else
-    uart_config_t cfg = {
-        .baud_rate = IPOD_SERIAL_BAUDRATE,
-        .data_bits = UART_DATA_8_BITS,
-        .parity    = UART_PARITY_DISABLE,
-        .stop_bits = UART_STOP_BITS_1,
-        .flow_ctrl = UART_HW_FLOWCTRL_DISABLE,
-        .source_clk = UART_SCLK_DEFAULT,
-    };
-
-    ESP_ERROR_CHECK(uart_param_config(UART_NUM_1, &cfg));
-
-    ESP_ERROR_CHECK(uart_set_pin(
-        UART_NUM_1,
-        UART1_TX,
-        UART1_RX,
-        UART_PIN_NO_CHANGE,
-        UART_PIN_NO_CHANGE));
-
-    ESP_ERROR_CHECK(uart_driver_install(
-        UART_NUM_1,
-        1024,
-        1024,
-        0,
-        nullptr,
-        0));
-
-    uart_flush(UART_NUM_1);
 #endif
 }
 
@@ -299,14 +330,24 @@ void initializeAudioOutput()
 	auto cfg = i2s.defaultConfig();
 	cfg.copyFrom(info);
 	i2s.begin(cfg);
+#endif
+	// Non-AUDIOKIT boards: nothing to do here anymore - audioOutput.begin()
+	// is called from the Bluetooth backend itself (once at startup for
+	// Esp32A2dpBluetoothSource, or dynamically per codec-config-change for
+	// NativeA2dpBluetoothSource), not eagerly here.
+}
+
+void initializeNvs()
+{
+#ifdef ARDUINO
 #else
-	auto cfg = i2s.defaultConfig(TX_MODE);
-	cfg.pin_ws = 25;   // Default is 15
-	cfg.pin_data = 26; // Default is 22
-	cfg.pin_bck = 27;  // Default is 14
-	cfg.sample_rate = 44100;
-	cfg.i2s_format = I2S_LSB_FORMAT;
-	i2s.begin(cfg);
+	// NVS init
+	esp_err_t ret = nvs_flash_init();
+	if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
+		ESP_ERROR_CHECK(nvs_flash_erase());
+		ESP_ERROR_CHECK(nvs_flash_init());
+	}
 #endif
 }
+
 #pragma endregion

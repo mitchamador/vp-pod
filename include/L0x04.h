@@ -1,6 +1,7 @@
 #pragma once
-#include "Arduino.h"
-#include "esPod_utils.h"
+
+#include "esPod.h"
+
 class esPod;
 
 #define L0x04_GetCurrentPlayingTrackChapterInfo 0x02

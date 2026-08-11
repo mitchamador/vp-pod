@@ -1,6 +1,7 @@
 #pragma once
-#include "Arduino.h"
+
 #include "esPod_utils.h"
+
 class esPod;
 
 #define L0x00_Identify 0x01

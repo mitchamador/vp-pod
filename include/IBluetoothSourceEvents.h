@@ -30,10 +30,15 @@ public:
 
     /// @brief Bluetooth connection state changed.
     /// @param state New connection state.
-    /// @param peerName Name of the connected peer device, or nullptr if not
-    /// available/not connected. The pointer is only guaranteed to be valid
-    /// for the duration of the call.
-    virtual void onConnectionStateChanged(BtConnectionState state, const char *peerName) = 0;
+    virtual void onConnectionStateChanged(BtConnectionState state) = 0;
+
+    /// @brief Peer device name became known (or changed). Fires separately
+    /// from onConnectionStateChanged because name resolution is often
+    /// asynchronous and resolves noticeably later than the connection
+    /// itself (e.g. esp_bt_gap_read_remote_name() on the native backend).
+    /// Only called while connected; a disconnect does not trigger this with
+    /// an empty name - just rely on onConnectionStateChanged(Disconnected).
+    virtual void onPeerNameChanged(const char *peerName) = 0;
 
     /// @brief Playback (audio) state changed - e.g. the phone started or
     /// paused streaming audio.
