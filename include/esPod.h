@@ -95,10 +95,8 @@ public:
     uint32_t trackListPosition = INVALID_TRACK_NUM; // Locator for the position of the track ID in the TrackList (of IDS)
 #else
     uint32_t trackChangeCompletedTimestamp = INVALID_TIMESTAMP;
-#endif
-
-#ifdef STATUS_NOTIFICATION_QUEUE
-    QueueHandle_t _statusChangeNotificationTimerQueue;
+    bool _getIndexedPlayingTrackTitleRequested = false;
+    bool _firstPbCmdToggle = false;
 #endif
 
 #ifdef USE_PEER_NAME
@@ -116,38 +114,36 @@ private:
     TaskHandle_t _processTaskHandle;
     TaskHandle_t _txTaskHandle;
     TaskHandle_t _timerTaskHandle;
-#ifdef STATUS_NOTIFICATION_QUEUE
-    TaskHandle_t _statusChangeNotificationTimerTaskHandle;
-#endif
 
     static void _rxTask(void *pvParameters);
     static void _processTask(void *pvParameters);
     static void _txTask(void *pvParameters);
     static void _timerTask(void *pvParameters); // Add this line
-#ifdef STATUS_NOTIFICATION_QUEUE
-    static void _statusChangeNotificationTimerTask(void *pvParameters);
-#endif
 
     // FreeRTOS timers for delayed acks
     TimerHandle_t _pendingTimer_0x00;
     TimerHandle_t _pendingTimer_0x03;
     TimerHandle_t _pendingTimer_0x04;
 
-    
     // Callbacks for each timer
     static void _pendingTimerCallback_0x00(TimerHandle_t xTimer);
     static void _pendingTimerCallback_0x03(TimerHandle_t xTimer);
     static void _pendingTimerCallback_0x04(TimerHandle_t xTimer);
+
     byte _pendingCmdId_0x00;
     byte _pendingCmdId_0x03;
     byte _pendingCmdId_0x04;
 
-#ifdef STATUS_NOTIFICATION_QUEUE
     // FreeRTOS timer for status change notification
-    TimerHandle_t _statusChangeNotificationTimer;
+    TimerHandle_t _playPositionTimer;
     // callback
-    static void _statusChangeNotificationTimerCallback(TimerHandle_t xTimer);
-#endif
+    static void _playPositionTimerCallback(TimerHandle_t xTimer);
+
+#define NO_PENDING_STATUS_NOTIFICATION 0xFF
+    byte _pendingStatusNotificationCmdId = NO_PENDING_STATUS_NOTIFICATION;
+
+    TimerHandle_t _notificationTimer = nullptr;
+    static void _notificationTimerTrampoline(TimerHandle_t xTimer);
 
     // Serial to the listening device
     IUart &_uart;
@@ -191,4 +187,6 @@ public:
     void onPlayStateChanged(BtPlayState state) override;
     void onTrackMetadata(const TrackMetadata &metadata, byte direction) override;
     void onPlayPosition(uint32_t positionMs) override;
+
+    void scheduleNotification(TimerCallbackMessage *msg, uint32_t delay);
  };

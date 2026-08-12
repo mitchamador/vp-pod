@@ -296,45 +296,62 @@ void esPod::_timerTask(void *pvParameters)
                     esPodInstance->trackChangeAckPending = 0x00;
                 }
             }
+            else if (msg.targetLingo == 0x27)
+            {
+                if (esPodInstance->playStatusNotificationState == NOTIF_ON) {
+                    if (msg.cmdID == 0x04) {
+                        // Playback track position changed
+                        if (esPodInstance->playStatus == PB_STATE_PLAYING
+                            && esPodInstance->playStatusNotificationState == NOTIF_ON
+                            && esPodInstance->trackChangeAckPending == 0x00) {
+                            L0x04::_0x27_PlayStatusNotification(esPodInstance, msg.cmdID, esPodInstance->getPlayPosition());
+                        }
+                    } else if (msg.cmdID == 0x01) {
+                        // Playback track changed
+                        L0x04::_0x27_PlayStatusNotification(esPodInstance, msg.cmdID,
+                            esPodInstance->currentTrackIndex != INVALID_TRACK_NUM ? esPodInstance->currentTrackIndex : START_INDEX);
+                    } else if (msg.cmdID == 0x00) {
+                        // Playback stopped 
+                        L0x04::_0x27_PlayStatusNotification(esPodInstance, msg.cmdID);
+                    }
+                }
+                if (esPodInstance->_pendingStatusNotificationCmdId == msg.cmdID) {
+                    esPodInstance->_pendingStatusNotificationCmdId = NO_PENDING_STATUS_NOTIFICATION;
+                }
+            }
         }
         vTaskDelay(pdMS_TO_TICKS(TIMER_INTERVAL_MS));
     }
 }
 
-#ifdef STATUS_NOTIFICATION_QUEUE
-/// @brief Low priority task to queue acks *outside* of the timer interrupt context
-/// @param pvParameters
-void esPod::_statusChangeNotificationTimerTask(void *pvParameters)
+void esPod::scheduleNotification(TimerCallbackMessage *msg, uint32_t delay)
 {
-    esPod *esPodInstance = static_cast<esPod *>(pvParameters);
-    StatusChangeNotificationTimerCallbackMessage msg;
-    while (true)
-    {
-        if (xQueueReceive(esPodInstance->_statusChangeNotificationTimerQueue, &msg, 0) == pdTRUE)
-        {
-            if (esPodInstance->playStatusNotificationState == NOTIF_ON) {
-                if (msg.cmdID == 0x04) {
-                    // Playback track position changed
-                    if (esPodInstance->playStatus == PB_STATE_PLAYING
-                        && esPodInstance->playStatusNotificationState == NOTIF_ON
-                        && esPodInstance->trackChangeAckPending == 0x00) {
-                        L0x04::_0x27_PlayStatusNotification(esPodInstance, msg.cmdID, esPodInstance->getPlayPosition());
-                    }
-                } else if (msg.cmdID == 0x01) {
-                    // Playback track changed
-                    L0x04::_0x27_PlayStatusNotification(esPodInstance, msg.cmdID,
-                        esPodInstance->currentTrackIndex != INVALID_TRACK_NUM ? esPodInstance->currentTrackIndex : START_INDEX);
-                } else if (msg.cmdID == 0x00) {
-                    // Playback stopped 
-                    L0x04::_0x27_PlayStatusNotification(esPodInstance, msg.cmdID);
-                }
-            }
-        }
-        vTaskDelay(pdMS_TO_TICKS(STATUS_CHANGE_NOTIFICATION_TIMER_INTERVAL_MS));
-    }
+    if (_pendingStatusNotificationCmdId == NO_PENDING_STATUS_NOTIFICATION) {
+        _pendingStatusNotificationCmdId = msg->cmdID;
+        ESP_LOGI(IPOD_TAG, "Schedule status notification 0x%02x", msg->cmdID);
 
+        TickType_t delay_ticks = pdMS_TO_TICKS(delay);
+        xTimerChangePeriod(_notificationTimer, delay_ticks == 0 ? 1 : delay_ticks, 0);
+    } else {
+        ESP_LOGE(IPOD_TAG, "Schedule status notification 0x%02x failed, pending 0x%02x notification", msg->cmdID, _pendingStatusNotificationCmdId);
+    }
 }
-#endif
+
+void esPod::_notificationTimerTrampoline(TimerHandle_t xTimer) {
+    auto *self = static_cast<esPod *>(pvTimerGetTimerID(xTimer));
+    if (self == nullptr) return;
+
+    TimerCallbackMessage msg;
+    msg.targetLingo = 0x27;
+    msg.cmdID = self->_pendingStatusNotificationCmdId;
+    
+    ESP_LOGD(IPOD_TAG, "Scheduled status notification 0x%02x", msg.cmdID);
+
+    if (xQueueSend(self->_timerQueue, &msg, 0) != pdPASS) {
+        ESP_LOGE(IPOD_TAG, "Failed to send msg to timerQueue");
+        self->_pendingStatusNotificationCmdId = NO_PENDING_STATUS_NOTIFICATION;
+    }
+}
 #pragma endregion
 
 #pragma region Timer Callbacks
@@ -366,16 +383,14 @@ void esPod::_pendingTimerCallback_0x04(TimerHandle_t xTimer)
     xQueueSendFromISR(esPodInstance->_timerQueue, &msg, NULL);
 }
 
-#ifdef STATUS_NOTIFICATION_QUEUE
-/// @brief Callback for L0x04 pending Ack timer
+/// @brief Callback for play position notification timer
 /// @param xTimer
-void esPod::_statusChangeNotificationTimerCallback(TimerHandle_t xTimer)
+void esPod::_playPositionTimerCallback(TimerHandle_t xTimer)
 {
     esPod *esPodInstance = static_cast<esPod *>(pvTimerGetTimerID(xTimer));
-    StatusChangeNotificationTimerCallbackMessage msg = {0x04};
-    xQueueSendFromISR(esPodInstance->_statusChangeNotificationTimerQueue, &msg, NULL);
+    TimerCallbackMessage msg = { .cmdID = 0x04, .targetLingo = 0x27};
+    xQueueSendFromISR(esPodInstance->_timerQueue, &msg, NULL);
 }
-#endif
 #pragma endregion
 
 //-----------------------------------------------------------------------
@@ -498,33 +513,19 @@ esPod::esPod(IUart &uart)
     _cmdQueue = xQueueCreate(CMD_QUEUE_SIZE, sizeof(aapCommand));
     _txQueue = xQueueCreate(TX_QUEUE_SIZE, sizeof(aapCommand));
     _timerQueue = xQueueCreate(TIMER_QUEUE_SIZE, sizeof(TimerCallbackMessage));
-#ifdef STATUS_NOTIFICATION_QUEUE
-    _statusChangeNotificationTimerQueue = xQueueCreate(STATUS_CHANGE_NOTIFICATION_TIMER_QUEUE_SIZE, sizeof(StatusChangeNotificationTimerCallbackMessage));
-    if (_cmdQueue == NULL || _txQueue == NULL || _timerQueue == NULL || _statusChangeNotificationTimerQueue == NULL) // Add _timerQueue check
-#else
     if (_cmdQueue == NULL || _txQueue == NULL || _timerQueue == NULL) // Add _timerQueue check
-#endif
     {
         ESP_LOGE(IPOD_TAG, "Could not create queues");
     }
 
     // Create FreeRTOS tasks for compiling incoming commands, processing commands and transmitting commands
-#ifdef STATUS_NOTIFICATION_QUEUE
-    if (_cmdQueue != NULL && _txQueue != NULL && _timerQueue != NULL && _statusChangeNotificationTimerQueue != NULL) // Add _timerQueue check
-#else
     if (_cmdQueue != NULL && _txQueue != NULL && _timerQueue != NULL) // Add _timerQueue check
-#endif
     {
         xTaskCreatePinnedToCore(_rxTask, "RX Task", RX_TASK_STACK_SIZE, this, RX_TASK_PRIORITY, &_rxTaskHandle, 1);
         xTaskCreatePinnedToCore(_processTask, "Processor Task", PROCESS_TASK_STACK_SIZE, this, PROCESS_TASK_PRIORITY, &_processTaskHandle, 1);
         xTaskCreatePinnedToCore(_txTask, "Transmit Task", TX_TASK_STACK_SIZE, this, TX_TASK_PRIORITY, &_txTaskHandle, 1);
         xTaskCreatePinnedToCore(_timerTask, "Timer Task", TIMER_TASK_STACK_SIZE, this, TIMER_TASK_PRIORITY, &_timerTaskHandle, 1);
-#ifdef STATUS_NOTIFICATION_QUEUE
-        xTaskCreatePinnedToCore(_statusChangeNotificationTimerTask, "Status change notification Timer Task", STATUS_CHANGE_NOTIFICATION_TIMER_TASK_STACK_SIZE, this, STATUS_CHANGE_NOTIFICATION_TIMER_TASK_PRIORITY, &_statusChangeNotificationTimerTaskHandle, 1);
-        if (_rxTaskHandle == NULL || _processTaskHandle == NULL || _txTaskHandle == NULL || _timerTaskHandle == NULL || _statusChangeNotificationTimerTaskHandle == NULL)
-#else
         if (_rxTaskHandle == NULL || _processTaskHandle == NULL || _txTaskHandle == NULL || _timerTaskHandle == NULL)
-#endif
         {
             ESP_LOGE(IPOD_TAG, "Could not create tasks");
         }
@@ -533,12 +534,10 @@ esPod::esPod(IUart &uart)
             _pendingTimer_0x00 = xTimerCreate("Pending Timer 0x00", pdMS_TO_TICKS(1000), pdFALSE, this, esPod::_pendingTimerCallback_0x00);
             _pendingTimer_0x03 = xTimerCreate("Pending Timer 0x03", pdMS_TO_TICKS(1000), pdFALSE, this, esPod::_pendingTimerCallback_0x03);
             _pendingTimer_0x04 = xTimerCreate("Pending Timer 0x04", pdMS_TO_TICKS(1000), pdFALSE, this, esPod::_pendingTimerCallback_0x04);
-#ifdef STATUS_NOTIFICATION_QUEUE
-            _statusChangeNotificationTimer = xTimerCreate("Status change notification Timer", pdMS_TO_TICKS(500), pdTRUE, this, esPod::_statusChangeNotificationTimerCallback);
-            if (_pendingTimer_0x00 == NULL || _pendingTimer_0x03 == NULL || _pendingTimer_0x04 == NULL || _statusChangeNotificationTimer == NULL)
-#else
-            if (_pendingTimer_0x00 == NULL || _pendingTimer_0x03 == NULL || _pendingTimer_0x04 == NULL)
-#endif
+            _playPositionTimer = xTimerCreate("Play position Timer", pdMS_TO_TICKS(500), pdTRUE, this, esPod::_playPositionTimerCallback);
+            _notificationTimer = xTimerCreate("Delayed status notification Timer", 1, pdFALSE, (void *)this, esPod::_notificationTimerTrampoline);
+
+            if (_pendingTimer_0x00 == NULL || _pendingTimer_0x03 == NULL || _pendingTimer_0x04 == NULL || _playPositionTimer == NULL || _notificationTimer == NULL) 
             {
                 ESP_LOGE(IPOD_TAG, "Could not create timers");
             }
@@ -558,22 +557,20 @@ esPod::~esPod()
     vTaskDelete(_processTaskHandle);
     vTaskDelete(_txTaskHandle);
     vTaskDelete(_timerTaskHandle);
-#ifdef STATUS_NOTIFICATION_QUEUE
-    vTaskDelete(_statusChangeNotificationTimerTaskHandle);
-#endif
+
     // Stop timers that might be running
     stopTimer(_pendingTimer_0x00);
     stopTimer(_pendingTimer_0x03);
     stopTimer(_pendingTimer_0x04);
-#ifdef STATUS_NOTIFICATION_QUEUE
-    stopTimer(_statusChangeNotificationTimer);
-#endif
+    stopTimer(_playPositionTimer);
+    stopTimer(_notificationTimer);
+        
     xTimerDelete(_pendingTimer_0x00, 0);
     xTimerDelete(_pendingTimer_0x03, 0);
     xTimerDelete(_pendingTimer_0x04, 0);
-#ifdef STATUS_NOTIFICATION_QUEUE
-    xTimerDelete(_statusChangeNotificationTimer, 0);
-#endif
+    xTimerDelete(_playPositionTimer, 0);
+    xTimerDelete(_notificationTimer, 0);
+
     // Remember to deallocate memory
     while (xQueueReceive(_cmdQueue, &tempCmd, 0) == pdTRUE)
     {
@@ -581,18 +578,17 @@ esPod::~esPod()
         tempCmd.payload = nullptr;
         tempCmd.length = 0;
     }
+
     while (xQueueReceive(_txQueue, &tempCmd, 0) == pdTRUE)
     {
         delete[] tempCmd.payload;
         tempCmd.payload = nullptr;
         tempCmd.length = 0;
     }
+
     vQueueDelete(_cmdQueue);
     vQueueDelete(_txQueue);
     vQueueDelete(_timerQueue);
-#ifdef STATUS_NOTIFICATION_QUEUE
-    vQueueDelete(_statusChangeNotificationTimerQueue);
-#endif
 }
 
 void esPod::resetState()
@@ -622,21 +618,8 @@ void esPod::resetState()
     trackListPosition = INVALID_TRACK_NUM;
 #else
     trackChangeCompletedTimestamp = INVALID_TIMESTAMP;
+    _getIndexedPlayingTrackTitleRequested = false;
 #endif
-
-    // Mini metadata
-    // _accessoryCapabilitiesReceived = false;
-    // _accessoryCapabilitiesRequested = false;
-    // _accessoryFirmwareReceived = false;
-    // _accessoryFirmwareRequested = false;
-    // _accessoryHardwareReceived = false;
-    // _accessoryHardwareRequested = false;
-    // _accessoryManufReceived = false;
-    // _accessoryManufRequested = false;
-    // _accessoryModelReceived = false;
-    // _accessoryModelRequested = false;
-    // _accessoryNameReceived = false;
-    // _accessoryNameRequested = false;
 
     // Reset the queues
     aapCommand tempCmd;
@@ -661,12 +644,13 @@ void esPod::resetState()
     stopTimer(_pendingTimer_0x00);
     stopTimer(_pendingTimer_0x03);
     stopTimer(_pendingTimer_0x04);
-#ifdef STATUS_NOTIFICATION_QUEUE
-    stopTimer(_statusChangeNotificationTimer);
-#endif
+    stopTimer(_playPositionTimer);
+    stopTimer(_notificationTimer);
+
     _pendingCmdId_0x00 = 0x00;
     _pendingCmdId_0x03 = 0x00;
     _pendingCmdId_0x04 = 0x00;
+    _pendingStatusNotificationCmdId = NO_PENDING_STATUS_NOTIFICATION;
 }
 
 void esPod::attachPlaybackSource(IBluetoothPlaybackSource &btSource)
@@ -718,12 +702,6 @@ void esPod::onPlayStateChanged(BtPlayState state)
 void esPod::onPlayPosition(uint32_t positionMs)
 {
     playPosition = positionMs;
-#ifndef STATUS_NOTIFICATION_QUEUE
-    if (playStatusNotificationState == NOTIF_ON && trackChangeAckPending == 0x00)
-    {
-        L0x04::_0x27_PlayStatusNotification(this, 0x04, positionMs);
-    }
-#endif
 }
 
 void esPod::onTrackMetadata(const TrackMetadata &metadata, byte direction)

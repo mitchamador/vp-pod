@@ -85,6 +85,7 @@ void L0x04::processLingo(esPod *esp, const byte *byteArray, uint32_t len)
         {
             ESP_LOGI(IPOD_TAG, "CMD 0x%04x ResetDBSelection", cmdID);
             L0x04::_0x01_iPodAck(esp, iPodAck_OK, cmdID);
+            esp->_getIndexedPlayingTrackTitleRequested = false;
         }
         break;
 
@@ -164,14 +165,14 @@ void L0x04::processLingo(esPod *esp, const byte *byteArray, uint32_t len)
                 for (uint32_t i = startIndex; i < startIndex + counts; i++)
                 {
 #if TOTAL_NUM_TRACKS == 3
-                    if (startIndex == 0 && counts == -1)
+//                    if (startIndex == 0 && counts == -1)
                     {
                         L0x04::_0x1B_ReturnCategorizedDatabaseRecord(esp, i, esp->fixedTrackTitle);
                     }
-                    else
-                    {
-                        L0x04::_0x1B_ReturnCategorizedDatabaseRecord(esp, i, i == 0 ? esp->fixedPrevTrackTitle : (i == 2 ? esp->fixedNextTrackTitle : (i > 2 ? esp->fixedEmptyTrackTitle : esp->trackTitle)));
-                    }
+                    // else
+                    // {
+                    //     L0x04::_0x1B_ReturnCategorizedDatabaseRecord(esp, i, i == 0 ? esp->fixedPrevTrackTitle : (i == 2 ? esp->fixedNextTrackTitle : (i > 2 ? esp->fixedEmptyTrackTitle : esp->trackTitle)));
+                    // }
 #else
                     L0x04::_0x1B_ReturnCategorizedDatabaseRecord(esp, i, esp->trackTitle);
 #endif
@@ -217,7 +218,8 @@ void L0x04::processLingo(esPod *esp, const byte *byteArray, uint32_t len)
         case L0x04_GetCurrentPlayingTrackIndex: // Get the uint32 index of the currently playing song
         {
             ESP_LOGI(IPOD_TAG, "CMD 0x%04x GetCurrentPlayingTrackIndex", cmdID);
-            L0x04::_0x1F_ReturnCurrentPlayingTrackIndex(esp, esp->currentTrackIndex != INVALID_TRACK_NUM ? esp->currentTrackIndex : START_INDEX);
+            L0x04::_0x1F_ReturnCurrentPlayingTrackIndex(esp, esp->currentTrackIndex != INVALID_TRACK_NUM ?
+                esp->currentTrackIndex : esp->_getIndexedPlayingTrackTitleRequested ? START_INDEX : 0);
         }
         break;
 
@@ -227,18 +229,23 @@ void L0x04::processLingo(esPod *esp, const byte *byteArray, uint32_t len)
             ESP_LOGI(IPOD_TAG, "CMD 0x%04x GetIndexedPlayingTrackTitle for index %d", cmdID, tempTrackIndex);
 
 #if TOTAL_NUM_TRACKS == 3
-            uint32_t current = platform::time_now_ms();
-            uint32_t trackChangeCompletedTimeout = current - esp->trackChangeCompletedTimestamp;
-            uint32_t trackChangeTimeout = current - esp->trackChangeTimestamp;
-            if ((trackChangeCompletedTimeout > 0 && trackChangeCompletedTimeout < FORCED_TRACK_CHANGE_TIMEOUT)
-                || (trackChangeTimeout > 0 && trackChangeTimeout < TRACK_CHANGE_NOTIFICATION_TIMEOUT))
-            {
-                // returning current playing track title
-                L0x04::_0x21_ReturnIndexedPlayingTrackTitle(esp, esp->trackTitle);
-            }
-            else
-            {
-                L0x04::_0x21_ReturnIndexedPlayingTrackTitle(esp, tempTrackIndex == 0 ? esp->fixedPrevTrackTitle : (tempTrackIndex == 2 ? esp->fixedNextTrackTitle : (tempTrackIndex > 2 ? esp->fixedEmptyTrackTitle : esp->trackTitle)));
+            if (tempTrackIndex == 1 && !esp->_getIndexedPlayingTrackTitleRequested) {
+                esp->_getIndexedPlayingTrackTitleRequested = true;
+                L0x04::_0x21_ReturnIndexedPlayingTrackTitle(esp, esp->fixedTrackTitle);
+            } else {
+                uint32_t current = platform::time_now_ms();
+                uint32_t trackChangeCompletedTimeout = current - esp->trackChangeCompletedTimestamp;
+                uint32_t trackChangeTimeout = current - esp->trackChangeTimestamp;
+                if ((trackChangeCompletedTimeout > 0 && trackChangeCompletedTimeout < FORCED_TRACK_CHANGE_TIMEOUT)
+                    || (trackChangeTimeout > 0 && trackChangeTimeout < TRACK_CHANGE_NOTIFICATION_TIMEOUT))
+                {
+                    // returning current playing track title
+                    L0x04::_0x21_ReturnIndexedPlayingTrackTitle(esp, esp->trackTitle);
+                }
+                else
+                {
+                    L0x04::_0x21_ReturnIndexedPlayingTrackTitle(esp, tempTrackIndex == 0 ? esp->fixedPrevTrackTitle : (tempTrackIndex == 2 ? esp->fixedNextTrackTitle : (tempTrackIndex > 2 ? esp->fixedEmptyTrackTitle : esp->trackTitle)));
+                }
             }
 #else
             if (tempTrackIndex == esp->prevTrackIndex)
@@ -290,18 +297,16 @@ void L0x04::processLingo(esPod *esp, const byte *byteArray, uint32_t len)
 
         case L0x04_SetPlayStatusChangeNotification: // Turns on basic notifications
         {
-#ifdef STATUS_NOTIFICATION_QUEUE
             esp->playStatusNotificationState = byteArray[2];
             if (esp->playStatusNotificationState == NOTIF_ON) {
-                if (xTimerIsTimerActive(esp->_statusChangeNotificationTimer) != pdTRUE) {
-                    xTimerStart(esp->_statusChangeNotificationTimer, 0);
+                if (xTimerIsTimerActive(esp->_playPositionTimer) != pdTRUE) {
+                    xTimerStart(esp->_playPositionTimer, 0);
                 }
             } else if (esp->playStatusNotificationState == NOTIF_OFF) {
-                if (xTimerIsTimerActive(esp->_statusChangeNotificationTimer) == pdTRUE) {
-                    xTimerStop(esp->_statusChangeNotificationTimer, 0);
+                if (xTimerIsTimerActive(esp->_playPositionTimer) == pdTRUE) {
+                    xTimerStop(esp->_playPositionTimer, 0);
                 }
             }
-#endif
             ESP_LOGI(IPOD_TAG, "CMD 0x%04x SetPlayStatusChangeNotification 0x%02x", cmdID, esp->playStatusNotificationState);
             L0x04::_0x01_iPodAck(esp, iPodAck_OK, cmdID);
         }
@@ -330,26 +335,16 @@ void L0x04::processLingo(esPod *esp, const byte *byteArray, uint32_t len)
             }
 
 #if TOTAL_NUM_TRACKS == 3
+            esp->_firstPbCmdToggle = true;
             if (esp->currentTrackIndex == INVALID_TRACK_NUM)
                 esp->currentTrackIndex = START_INDEX;
 
-            // if (tempTrackIndex != 1)
-            // {
-            //     StatusChangeNotificationTimerCallbackMessage msg = {0x01};
-            //     xQueueSend(esp->_statusChangeNotificationTimerQueue, &msg, pdMS_TO_TICKS(0));
-            // }
-
-#ifndef NO_STATUS_STOP
-            L0x04::_0x27_PlayStatusNotification(esp, 0x01, esp->currentTrackIndex);
-#endif
             bool _iPodAck_OK = false;
             uint32_t currentMillis = platform::time_now_ms();
             if (cmdID == L0x04_PlayCurrentSelection && ((currentMillis - setCurrentPlayingTrackMillis) < SKIP_PLAYCURRENT_TIMEOUT))
             {
                 ESP_LOGI(IPOD_TAG, "CMD 0x%04x PlayCurrentSelection index %d, currentTrack %d - skipping", cmdID, tempTrackIndex, _currentTrackIndex);
-#ifdef NO_STATUS_STOP
                 L0x04::_0x27_PlayStatusNotification(esp, 0x01, esp->currentTrackIndex);
-#endif
                 L0x04::_0x01_iPodAck(esp, iPodAck_OK, cmdID);
                 break;
             }
@@ -359,9 +354,7 @@ void L0x04::processLingo(esPod *esp, const byte *byteArray, uint32_t len)
             if (tempTrackIndex == esp->currentTrackIndex)
             {
                 ESP_LOGI(IPOD_TAG, "Selected same track as current: %d", tempTrackIndex);
-#ifdef NO_STATUS_STOP
                 L0x04::_0x27_PlayStatusNotification(esp, 0x01, esp->currentTrackIndex);
-#endif
                 L0x04::_0x01_iPodAck(esp, iPodAck_OK, cmdID);
                 break;
             }
@@ -369,9 +362,9 @@ void L0x04::processLingo(esPod *esp, const byte *byteArray, uint32_t len)
             if (_playStatus != PB_STATE_PLAYING)
             {
                 ESP_LOGI(IPOD_TAG, "Change play status to PB_STATE_PLAYING");
-#ifdef NO_STATUS_STOP
-                L0x04::_0x27_PlayStatusNotification(esp, 0x01, esp->currentTrackIndex);
-#endif
+                L0x04::_0x27_PlayStatusNotification(esp, 0x01, tempTrackIndex);
+                TimerCallbackMessage msg = { .cmdID = 0x01, .targetLingo = 0x27 };
+                esp->scheduleNotification(&msg, FIRST_TIME_TRACK_CHANGE_NOTIFICATION_TIMEOUT);
                 L0x04::_0x01_iPodAck(esp, iPodAck_OK, cmdID);
                 break;
             }
@@ -401,11 +394,7 @@ void L0x04::processLingo(esPod *esp, const byte *byteArray, uint32_t len)
                         esp->_btSource->next(); // Fire the metadata trigger indirectly
             }
 
-#ifndef NO_STATUS_STOP            
-            L0x04::_0x27_PlayStatusNotification(esp, 0x00);
-#else
             L0x04::_0x27_PlayStatusNotification(esp, 0x01, tempTrackIndex);
-#endif
 #else
             esp->trackList[esp->trackListPosition] = esp->currentTrackIndex;
 
@@ -485,6 +474,13 @@ void L0x04::processLingo(esPod *esp, const byte *byteArray, uint32_t len)
                 else
                 {
 #if TOTAL_NUM_TRACKS == 3
+                    if (!esp->_firstPbCmdToggle) {
+                        esp->_firstPbCmdToggle = true;
+                        ESP_LOGI(IPOD_TAG, "Change play status to PB_STATE_PLAYING");
+                        L0x04::_0x27_PlayStatusNotification(esp, 0x01, 0);
+                        TimerCallbackMessage msg = { .cmdID = 0x01, .targetLingo = 0x27 };
+                        esp->scheduleNotification(&msg, FIRST_TIME_TRACK_CHANGE_NOTIFICATION_TIMEOUT);
+                    }
                     esp->currentTrackIndex = START_INDEX;
 #endif
                     esp->playStatus = PB_STATE_PLAYING; // Switch to playing in any other case
@@ -526,11 +522,7 @@ void L0x04::processLingo(esPod *esp, const byte *byteArray, uint32_t len)
 
 #if TOTAL_NUM_TRACKS == 3
                 if (esp->playStatusNotificationState == NOTIF_ON) {
-#ifdef NO_STATUS_STOP
                     L0x04::_0x27_PlayStatusNotification(esp, 0x01, TOTAL_NUM_TRACKS - 1);
-#else
-                    L0x04::_0x27_PlayStatusNotification(esp, 0x00);
-#endif
                 }
 #endif
             }

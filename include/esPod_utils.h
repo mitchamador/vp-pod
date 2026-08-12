@@ -108,12 +108,7 @@ struct aapCommand
 struct TimerCallbackMessage
 {
     byte cmdID;       // Command ID to be acked
-    byte targetLingo; // Targeted Lingo
-};
-
-struct StatusChangeNotificationTimerCallbackMessage
-{
-    byte cmdID;      // Command ID
+    byte targetLingo; // Targeted Lingo (or 0x27 for status notification)
 };
 
 struct TrackMetadata
