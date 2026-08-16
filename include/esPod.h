@@ -21,6 +21,14 @@ typedef uint8_t byte;
 #include "platform.h"
 #include "IBluetoothPlaybackSource.h"
 #include "IBluetoothSourceEvents.h"
+#include "storage.h"
+
+namespace SettingsKeys
+{
+    constexpr const char *SeekAsVolume = "seek_as_vol";
+    // Next persisted setting - just another line here, plus one more in
+    // esPod::loadSettingsFromStorage().
+}
 
 #ifndef IPOD_TAG
 #define IPOD_TAG "esPod"
@@ -100,13 +108,26 @@ public:
     bool _firstPbCmdToggle = false;
 #endif
 
-#ifdef USE_PEER_NAME
+    // USE_PEER_NAME
     const char *_peer_name = nullptr;
-#endif
 
-#ifndef SEEK_CHANGES_VOLUME
-    uint8_t _pbCmdTickCount = 0;
-#endif
+    // Runtime seek mode (see SEEK_MODE_DEFAULT_VOLUME/SEEK_MODE_TOGGLE_WINDOW_MS
+    // in esPod_conf.h) and the hidden double-shuffle-toggle gesture that flips it.
+    bool _seekAsVolume = SEEK_MODE_DEFAULT_VOLUME;
+    uint32_t _lastShuffleToggleTimestamp = INVALID_TIMESTAMP;
+
+public:
+    /// @brief Loads all persisted settings (currently just seek mode) -
+    /// call once, explicitly, from setup()/app startup after storage::init()
+    /// has run. Deliberately NOT done in the constructor: esPod is normally
+    /// a global object, constructed before setup() runs and before NVS
+    /// itself is ready - see storage.h.
+    void loadSettingsFromStorage();
+
+    /// @brief Sets and persists the seek mode - use this instead of writing
+    /// _seekAsVolume directly, so every place that changes it (currently
+    /// just the Shuffle gesture in L0x04) doesn't need to remember to save.
+    void setSeekAsVolume(bool value);
 
 private:
     // FreeRTOS Queues
@@ -178,6 +199,15 @@ private:
 
     // Applies pending metadata, handling the ack/notification dance.
     void _applyTrackMetadata(const TrackMetadata *pending, byte direction);
+    
+    // Fallback direction detection for peers that don't fill in
+    // track_num/num_tracks meaningfully (observed: always 1/1 on at least
+    // one Android AVRCP TG stack) - not guaranteed ordered by the AVRCP
+    // spec, but observed to be a simple incrementing index there.
+#define INVALID_TRACK_UID UINT64_MAX
+    uint64_t trackUid = INVALID_TRACK_UID;
+    uint64_t prevTrackUid = INVALID_TRACK_UID; 
+    static uint64_t _uidToU64(const uint8_t uid[8]);
 
 public:
     explicit esPod(IUart &uart);
@@ -196,6 +226,7 @@ public:
     void onPlayStateChanged(BtPlayState state) override;
     void onTrackMetadata(const TrackMetadata &metadata, byte direction) override;
     void onPlayPosition(uint32_t positionMs) override;
+    void onTrackChange(uint8_t *uid) override;
 
     void scheduleNotification(TimerCallbackMessage *msg, uint32_t delay);
     void firePbCmdTimer(uint8_t pbCmd);

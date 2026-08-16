@@ -2,6 +2,7 @@
 #include "NativeA2dpBluetoothSource.h"
 #include "esPod_conf.h"
 #include "platform.h"
+#include <cstring>
 
 #ifdef ZERO_VOLUME_FIX
 #include "nvs_flash.h"
@@ -110,12 +111,9 @@ void NativeA2dpBluetoothSource::begin(const char *deviceName)
 #endif
     _a2dp.set_stream_reader(_streamReaderTrampoline, false);
     _a2dp.set_codec_config_callback(_codecConfigTrampoline);
-#ifdef TRACK_CHANGE_CALLBACK
     _a2dp.set_avrc_rn_track_change_callback(_avrcTrackChangeTrampoline);
-#endif
-#ifdef USE_PEER_NAME
     _a2dp.set_on_peer_name_available(_peerNameAvailableTrampoline);
-#endif
+
     _a2dp.start(deviceName);
 
     ESP_LOGI("BT_SRC", "NativeA2DPSink started: %s", deviceName);
@@ -197,6 +195,9 @@ void NativeA2dpBluetoothSource::_runProcessAvrcTask()
     AvrcMetadataItem incMetadata;
 
     TrackMetadata pendingMetadata;
+    pendingMetadata.artist[0] = '\0';
+    pendingMetadata.album[0] = '\0';
+    pendingMetadata.title[0] = '\0';
 
     uint32_t trackNum = INVALID_TRACK_NUM, prevTrackNum = INVALID_TRACK_NUM;
     uint32_t avrcMetadataTimestamp = INVALID_TIMESTAMP;
@@ -239,7 +240,9 @@ void NativeA2dpBluetoothSource::_runProcessAvrcTask()
 
             if (_sink != nullptr)
             {
-                _sink->onTrackMetadata(pendingMetadata, trackNum < prevTrackNum ? PB_CMD_PREV : PB_CMD_NEXT);
+                _sink->onTrackMetadata(pendingMetadata, trackNum < prevTrackNum ? BROWSE_DIRECTION_PREV
+                                                     : (trackNum > prevTrackNum ? BROWSE_DIRECTION_NEXT
+                                                                                : BROWSE_DIRECTION_NONE));
             }
 
             prevTrackNum = trackNum;
@@ -275,9 +278,7 @@ void NativeA2dpBluetoothSource::_connectionStateChangedTrampoline(esp_a2d_connec
         if (self->_sink != nullptr)
         {
             self->_sink->onConnectionStateChanged(BtConnectionState::Connected);
-#ifdef USE_PEER_NAME
             self->_sink->onPeerNameChanged(self->_a2dp.get_peer_name());
-#endif
         }
         break;
     case ESP_A2D_CONNECTION_STATE_DISCONNECTED:
@@ -507,17 +508,15 @@ void NativeA2dpBluetoothSource::_codecConfigTrampoline(uint32_t rate, uint8_t bp
     self->_audioOutput->begin(rate, bps, channels);
 }
 
-#ifdef TRACK_CHANGE_CALLBACK
 void NativeA2dpBluetoothSource::_avrcTrackChangeTrampoline(uint8_t *uid)
 {
-    ESP_LOGI("BT_SRC",
-             "Track UID: %02X%02X%02X%02X%02X%02X%02X%02X",
-             uid[0], uid[1], uid[2], uid[3],
-             uid[4], uid[5], uid[6], uid[7]);
+    auto *self = _instance;
+    if (self == nullptr)
+        return;
+    if (self->_sink != nullptr)
+        self->_sink->onTrackChange(uid);
 }
-#endif
 
-#ifdef USE_PEER_NAME
 void NativeA2dpBluetoothSource::_peerNameAvailableTrampoline(const char *name)
 {
     auto *self = _instance;
@@ -532,6 +531,5 @@ void NativeA2dpBluetoothSource::_peerNameAvailableTrampoline(const char *name)
         self->_sink->onPeerNameChanged(name);
     }
 }
-#endif
 
 #endif

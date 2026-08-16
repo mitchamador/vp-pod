@@ -2,7 +2,7 @@
 
 #include "NativeA2dpBluetoothSink.h"
 
-#include "esPod_conf.h" // TRACK_POSITION_FIX / ZERO_VOLUME_FIX / TRACK_CHANGE_CALLBACK / USE_PEER_NAME
+#include "esPod_conf.h" // TRACK_POSITION_FIX / ZERO_VOLUME_FIX
 #include "IBluetoothPlaybackSource.h"
 #include "IBluetoothSourceEvents.h"
 #include "IAudioOutput.h"
@@ -99,10 +99,6 @@ private:
 #endif
     static void _streamReaderTrampoline(const uint8_t *data, uint32_t length);
     static void _codecConfigTrampoline(uint32_t rate, uint8_t bps, uint8_t channels);
-#ifdef TRACK_CHANGE_CALLBACK
     static void _avrcTrackChangeTrampoline(uint8_t *uid);
-#endif
-#ifdef USE_PEER_NAME
     static void _peerNameAvailableTrampoline(const char *name);
-#endif
 };

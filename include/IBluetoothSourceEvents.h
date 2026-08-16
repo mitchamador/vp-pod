@@ -53,4 +53,8 @@ public:
     /// @brief Current playback position, in milliseconds since the start of
     /// the track. Called periodically (roughly once a second) while playing.
     virtual void onPlayPosition(uint32_t positionMs) = 0;
+
+    /// @brief Track change event
+    /// @param uid 
+    virtual void onTrackChange(uint8_t *uid) = 0;
 };

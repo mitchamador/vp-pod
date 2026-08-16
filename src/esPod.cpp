@@ -327,31 +327,27 @@ void esPod::_timerTask(void *pvParameters)
             {
                 if (msg.cmdID == PB_CMD_SEEK_FF)
                 {
-#ifdef SEEK_CHANGES_VOLUME
                     if (esPodInstance->_btSource) {
-                        ESP_LOGI(IPOD_TAG, "IBluetoothSource::volume_up()");
-                        esPodInstance->_btSource->volume_up();
+                        if (esPodInstance->_seekAsVolume) {
+                            ESP_LOGI(IPOD_TAG, "IBluetoothSource::volume_up()");
+                            esPodInstance->_btSource->volume_up();
+                        } else if (esPodInstance->playStatus == PB_STATE_PLAYING) {
+                            ESP_LOGI(IPOD_TAG, "IBluetoothSource::fast_forward()");
+                            esPodInstance->_btSource->fast_forward();
+                        }
                     }
-#else
-                    if (esPodInstance->playStatus == PB_STATE_PLAYING && esPodInstance->_btSource) {
-                        ESP_LOGI(IPOD_TAG, "IBluetoothSource::fast_forward()");
-                        esPodInstance->_btSource->fast_forward();
-                    }
-#endif
                 }
                 else if (msg.cmdID == PB_CMD_SEEK_RW)
                 {
-#ifdef SEEK_CHANGES_VOLUME
                     if (esPodInstance->_btSource) {
-                        ESP_LOGI(IPOD_TAG, "IBluetoothSource::volume_down()");
-                        esPodInstance->_btSource->volume_down();
+                        if (esPodInstance->_seekAsVolume) {
+                            ESP_LOGI(IPOD_TAG, "IBluetoothSource::volume_down()");
+                            esPodInstance->_btSource->volume_down();
+                        } else if (esPodInstance->playStatus == PB_STATE_PLAYING) {
+                            ESP_LOGI(IPOD_TAG, "IBluetoothSource::rewind()");
+                            esPodInstance->_btSource->rewind();
+                        }
                     }
-#else
-                    if (esPodInstance->playStatus == PB_STATE_PLAYING && esPodInstance->_btSource) {
-                        ESP_LOGI(IPOD_TAG, "IBluetoothSource::rewind()");
-                        esPodInstance->_btSource->rewind();
-                    }
-#endif
                 }
             }
         }
@@ -655,6 +651,7 @@ void esPod::resetState()
     trackChangeCompletedTimestamp = INVALID_TIMESTAMP;
     _getIndexedPlayingTrackTitleRequested = false;
 #endif
+    trackUid = prevTrackUid = INVALID_TRACK_UID;
 
     // Reset the queues
     aapCommand tempCmd;
@@ -724,10 +721,8 @@ void esPod::onConnectionStateChanged(BtConnectionState state)
 
 void esPod::onPeerNameChanged(const char *peerName)
 {
-#ifdef USE_PEER_NAME
     _peer_name = peerName;
     ESP_LOGI(IPOD_TAG, "Peer connected: %s", peerName);
-#endif
 }
 
 void esPod::onPlayStateChanged(BtPlayState state)
@@ -741,9 +736,41 @@ void esPod::onPlayPosition(uint32_t positionMs)
     playPosition = positionMs;
 }
 
+void esPod::onTrackChange(uint8_t *uid)
+{
+    ESP_LOGI(IPOD_TAG,
+            "Track UID: %02X%02X%02X%02X%02X%02X%02X%02X",
+            uid[0], uid[1], uid[2], uid[3],
+            uid[4], uid[5], uid[6], uid[7]);
+
+    trackUid = _uidToU64((const uint8_t *)uid);
+    if (prevTrackUid == INVALID_TRACK_UID) prevTrackUid = trackUid;
+}
+
 void esPod::onTrackMetadata(const TrackMetadata &metadata, byte direction)
 {
+    if (direction == BROWSE_DIRECTION_NONE && trackUid != INVALID_TRACK_UID)
+    {
+        // track_num/num_tracks didn't distinguish prev/next (e.g.
+        // both reported as 1) - fall back to the track UID.
+        direction = (trackUid < prevTrackUid) ? BROWSE_DIRECTION_PREV : BROWSE_DIRECTION_NEXT;
+        ESP_LOGD("BT_SRC", "UID fallback -> %s",
+                    direction == BROWSE_DIRECTION_PREV ? "PREV" : "NEXT");
+    }
+
     _applyTrackMetadata(&metadata, direction);
+
+    prevTrackUid = trackUid;
+}
+
+uint64_t esPod::_uidToU64(const uint8_t uid[8])
+{
+    uint64_t v = 0;
+    for (int i = 0; i < 8; i++)
+    {
+        v = (v << 8) | uid[i];
+    }
+    return v;
 }
 
 void esPod::_applyTrackMetadata(const TrackMetadata *pending, byte direction)
@@ -761,7 +788,7 @@ void esPod::_applyTrackMetadata(const TrackMetadata *pending, byte direction)
         byte _trackChangeAckPending = trackChangeAckPending;
         if (trackChangeAckPending > 0x00)
         {
-            ESP_LOGD("AVRC_CB",
+            ESP_LOGD(IPOD_TAG,
                      "Artist+Album+Title+Duration +++ ACK Pending "
                      "0x%x\n\tPending duration: %d",
                      trackChangeAckPending, platform::time_now_ms() - trackChangeTimestamp);
@@ -775,10 +802,10 @@ void esPod::_applyTrackMetadata(const TrackMetadata *pending, byte direction)
                 L0x04::_0x01_iPodAck(this, iPodAck_OK, trackChangeAckPending);
             }
             trackChangeAckPending = 0x00;
-            ESP_LOGD("AVRC_CB", "trackChangeAckPending reset to 0x00");
+            ESP_LOGD(IPOD_TAG, "trackChangeAckPending reset to 0x00");
         }
 
-        ESP_LOGD("AVRC_CB", "Artist+Album+Title+Duration : True -> False");
+        ESP_LOGD(IPOD_TAG, "Artist+Album+Title+Duration : True -> False");
         // Inform the car
         if (playStatusNotificationState == NOTIF_ON)
         {
@@ -787,7 +814,7 @@ void esPod::_applyTrackMetadata(const TrackMetadata *pending, byte direction)
             if (_trackChangeAckPending == 0x00)
             {
                 trackChangeTimestamp = platform::time_now_ms();
-                L0x04::_0x27_PlayStatusNotification(this, 0x01, direction == PB_CMD_PREV ? 0 : TOTAL_NUM_TRACKS - 1);
+                L0x04::_0x27_PlayStatusNotification(this, 0x01, direction == BROWSE_DIRECTION_PREV ? 0 : TOTAL_NUM_TRACKS - 1);
             }
 #if 0
             uint32_t trackNotificationDelay = platform::time_now_ms() - trackChangeTimestamp;
@@ -835,6 +862,19 @@ void esPod::firePbCmdTimer(uint8_t pbCmd)
             xTimerStop(_pbCmdTimer, 0);
         }
     }
+}
+
+void esPod::loadSettingsFromStorage()
+{
+    _seekAsVolume = storage::getBool(SettingsKeys::SeekAsVolume, SEEK_MODE_DEFAULT_VOLUME);
+    ESP_LOGI(IPOD_TAG, "Loaded settings: seekAsVolume=%d", _seekAsVolume);
+    // Next persisted setting - just another line here.
+}
+
+void esPod::setSeekAsVolume(bool value)
+{
+    _seekAsVolume = value;
+    storage::setBool(SettingsKeys::SeekAsVolume, value);
 }
 
 #pragma endregion

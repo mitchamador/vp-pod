@@ -592,6 +592,28 @@ void L0x04::processLingo(esPod *esp, const byte *byteArray, uint32_t len)
 #endif
             {
                 ESP_LOGI(IPOD_TAG, "CMD 0x%04x SetShuffle req: 0x%02x vs shuffleStatus: 0x%02x", cmdID, _shuffleRequest, esp->shuffleStatus);
+
+                // Hidden gesture: toggling Shuffle twice within
+                // SEEK_MODE_TOGGLE_WINDOW_MS flips the FF/REW seek mode
+                // (real AVRCP clicks vs. the iOS volume-nudge workaround) -
+                // no web UI/settings storage needed for this one flag.
+                if (_shuffleRequest != esp->shuffleStatus)
+                {
+                    uint32_t now = platform::time_now_ms();
+                    if (esp->_lastShuffleToggleTimestamp != INVALID_TIMESTAMP &&
+                        (now - esp->_lastShuffleToggleTimestamp) < SEEK_MODE_TOGGLE_WINDOW_MS)
+                    {
+                        esp->setSeekAsVolume(!esp->_seekAsVolume);
+                        ESP_LOGW(IPOD_TAG, "Seek mode toggled via Shuffle gesture: %s",
+                                 esp->_seekAsVolume ? "volume" : "fast_forward/rewind");
+                        esp->_lastShuffleToggleTimestamp = INVALID_TIMESTAMP; // consume - needs a fresh pair to trigger again
+                    }
+                    else
+                    {
+                        esp->_lastShuffleToggleTimestamp = now;
+                    }
+                }
+
                 esp->shuffleStatus = _shuffleRequest;
                 L0x04::_0x01_iPodAck(esp, iPodAck_OK, cmdID);
             }

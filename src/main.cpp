@@ -157,7 +157,6 @@ esPod espod(uart);
 void initializeSDCard();
 void initializeSerial();
 void initializeAudioOutput();
-void initializeNvs();
 #pragma endregion
 
 #ifndef ARDUINO
@@ -230,7 +229,8 @@ void setup()
 
 	initializeAudioOutput();
 
-	initializeNvs();
+	storage::init();
+	espod.loadSettingsFromStorage();
 
 	espod.attachPlaybackSource(btSource);
 
@@ -335,19 +335,6 @@ void initializeAudioOutput()
 	// is called from the Bluetooth backend itself (once at startup for
 	// Esp32A2dpBluetoothSource, or dynamically per codec-config-change for
 	// NativeA2dpBluetoothSource), not eagerly here.
-}
-
-void initializeNvs()
-{
-#ifdef ARDUINO
-#else
-	// NVS init
-	esp_err_t ret = nvs_flash_init();
-	if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
-		ESP_ERROR_CHECK(nvs_flash_erase());
-		ESP_ERROR_CHECK(nvs_flash_init());
-	}
-#endif
 }
 
 #pragma endregion

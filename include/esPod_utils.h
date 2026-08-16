@@ -87,6 +87,13 @@ enum NOTIF_STATES : byte
     NOTIF_ON = 0x01
 };
 
+enum BROWSE_DIRECTION : byte
+{
+    BROWSE_DIRECTION_NONE = 0x00,
+    BROWSE_DIRECTION_NEXT = 0x01,
+    BROWSE_DIRECTION_PREV = 0x02
+};
+
 #pragma endregion
 
 struct aapCommand

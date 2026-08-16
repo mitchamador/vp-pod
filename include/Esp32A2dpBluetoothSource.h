@@ -4,7 +4,7 @@
 #include "AudioTools.h"
 #include "BluetoothA2DPSink.h"
 
-#include "esPod_conf.h" // TRACK_POSITION_FIX / ZERO_VOLUME_FIX / TRACK_CHANGE_CALLBACK / USE_PEER_NAME
+#include "esPod_conf.h" // TRACK_POSITION_FIX / ZERO_VOLUME_FIX
 #include "IBluetoothPlaybackSource.h"
 #include "IBluetoothSourceEvents.h"
 #include "IAudioOutput.h"
@@ -121,9 +121,7 @@ private:
 #if defined(TRACK_POSITION_FIX)
     static void _readDataStreamTrampoline(const uint8_t *data, uint32_t length);
 #endif
-#ifdef TRACK_CHANGE_CALLBACK
     static void _avrcTrackChangeTrampoline(uint8_t *uid);
-#endif
 };
 
 #endif
