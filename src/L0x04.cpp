@@ -103,7 +103,11 @@ void L0x04::processLingo(esPod *esp, const byte *byteArray, uint32_t len)
             ESP_LOGI(IPOD_TAG, "CMD 0x%04x GetNumberCategorizedDBRecords category: 0x%02x", cmdID, category);
             if (category == DB_CAT_TRACK)
             {
+#ifdef SINGLE_DB_CAT_TRACKS
+                L0x04::_0x19_ReturnNumberCategorizedDBRecords(esp, 1); // Say there are fixed, large amount of tracks
+#else
                 L0x04::_0x19_ReturnNumberCategorizedDBRecords(esp, esp->totalNumberTracks); // Say there are fixed, large amount of tracks
+#endif
             }
             else
             { // And only one of anything else (Playlist, album, artist etc...)
@@ -164,15 +168,8 @@ void L0x04::processLingo(esPod *esp, const byte *byteArray, uint32_t len)
             case DB_CAT_TRACK: // Will sometimes return twice
                 for (uint32_t i = startIndex; i < startIndex + counts; i++)
                 {
-#if TOTAL_NUM_TRACKS == 3
-//                    if (startIndex == 0 && counts == -1)
-                    {
-                        L0x04::_0x1B_ReturnCategorizedDatabaseRecord(esp, i, esp->fixedTrackTitle);
-                    }
-                    // else
-                    // {
-                    //     L0x04::_0x1B_ReturnCategorizedDatabaseRecord(esp, i, i == 0 ? esp->fixedPrevTrackTitle : (i == 2 ? esp->fixedNextTrackTitle : (i > 2 ? esp->fixedEmptyTrackTitle : esp->trackTitle)));
-                    // }
+#if TOTAL_NUM_TRACKS == 3 && !defined(SINGLE_DB_CAT_TRACKS)
+                    L0x04::_0x1B_ReturnCategorizedDatabaseRecord(esp, i, i == 0 ? esp->fixedPrevTrackTitle : (i == 2 ? esp->fixedNextTrackTitle : (i > 2 ? esp->fixedEmptyTrackTitle : esp->trackTitle)));
 #else
                     L0x04::_0x1B_ReturnCategorizedDatabaseRecord(esp, i, esp->trackTitle);
 #endif
@@ -381,12 +378,8 @@ void L0x04::processLingo(esPod *esp, const byte *byteArray, uint32_t len)
 
             if (tempTrackIndex < esp->currentTrackIndex)
             {
-                // todo double A2DP_PREV
                 if (esp->_btSource)
-                        esp->_btSource->previous(); // Fire the metadata trigger indirectly
-                // if (esp->getPlayPosition() < 3000) {
-                //     esp->_playStatusHandler(A2DP_PREV); // Fire the metadata trigger indirectly
-                // }
+                    esp->_btSource->previous(); // Fire the metadata trigger indirectly
             }
             else if (tempTrackIndex > esp->currentTrackIndex)
             {
@@ -418,8 +411,8 @@ void L0x04::processLingo(esPod *esp, const byte *byteArray, uint32_t len)
                 L0x04::_0x01_iPodAck(esp, iPodAck_CmdPending, cmdID, TRACK_CHANGE_TIMEOUT);
 
                 // Fire the A2DP when ready
-                if (esp->_playStatusHandler)
-                    esp->_playStatusHandler(A2DP_PREV); // Fire the metadata trigger indirectly
+                if (esp->_btSource)
+                    esp->_btSource->previous(); // Fire the metadata trigger indirectly
             }
             else if (tempTrackIndex == esp->currentTrackIndex) // Somehow reselecting the current track
             {
@@ -427,8 +420,8 @@ void L0x04::processLingo(esPod *esp, const byte *byteArray, uint32_t len)
                 L0x04::_0x01_iPodAck(esp, iPodAck_OK, cmdID);
 
                 // Fire the A2DP when ready
-                if (esp->_playStatusHandler)
-                    esp->_playStatusHandler(A2DP_PREV); // Fire the metadata trigger indirectly
+                if (esp->_btSource)
+                    esp->_btSource->previous(); // Fire the metadata trigger indirectly
             }
             else // If it is not the previous or the current track, it automatically becomes a next track
             {
@@ -451,8 +444,8 @@ void L0x04::processLingo(esPod *esp, const byte *byteArray, uint32_t len)
                 L0x04::_0x01_iPodAck(esp, iPodAck_CmdPending, cmdID, TRACK_CHANGE_TIMEOUT);
 
                 // Fire the A2DP when ready
-                if (esp->_playStatusHandler)
-                    esp->_playStatusHandler(A2DP_NEXT); // Fire the metadata trigger indirectly
+                if (esp->_btSource)
+                    esp->_btSource->next(); // Fire the metadata trigger indirectly
             }
 #endif
         }
@@ -560,6 +553,19 @@ void L0x04::processLingo(esPod *esp, const byte *byteArray, uint32_t len)
                 L0x04::_0x01_iPodAck(esp, iPodAck_OK, cmdID);
                 if (esp->_btSource)
                         esp->_btSource->pause();
+            }
+            break;
+            case PB_CMD_SEEK_FF:
+            case PB_CMD_SEEK_RW:
+            case PB_CMD_STOP_SEEK:
+            {
+                esp->firePbCmdTimer(byteArray[2]);
+                L0x04::_0x01_iPodAck(esp, iPodAck_OK, cmdID);
+            }
+            break;
+            default:
+            {
+                L0x04::_0x01_iPodAck(esp, iPodAck_BadParam, cmdID);
             }
             break;
             }

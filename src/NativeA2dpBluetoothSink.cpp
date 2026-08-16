@@ -452,9 +452,9 @@ void NativeA2DPSink::previous()    { execute_avrc_command(ESP_AVRC_PT_CMD_BACKWA
 void NativeA2DPSink::fast_forward(){ execute_avrc_command(ESP_AVRC_PT_CMD_FAST_FORWARD); }
 void NativeA2DPSink::rewind()      { execute_avrc_command(ESP_AVRC_PT_CMD_REWIND); }
 
-void NativeA2DPSink::volume_up()   { volume_set_by_local_host((s_volume + 5) & 0x7f); }
+void NativeA2DPSink::volume_up()   { volume_set_by_local_host(s_volume + 5 > 0x7f ? 0x7f : s_volume + 5); }
 void NativeA2DPSink::volume_down() { volume_set_by_local_host(s_volume > 5 ? s_volume - 5 : 0); }
-void NativeA2DPSink::set_volume(uint8_t v) { volume_set_by_local_host(v & 0x7f); }
+void NativeA2DPSink::set_volume(uint8_t v) { volume_set_by_local_host(v < 0x7f ? v : 0x7f); }
 int  NativeA2DPSink::get_volume()  { _lock_acquire(&s_volume_lock); int v=s_volume; _lock_release(&s_volume_lock); return v; }
 
 void NativeA2DPSink::volume_set_by_controller(uint8_t volume) {

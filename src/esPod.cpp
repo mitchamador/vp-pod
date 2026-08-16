@@ -304,7 +304,11 @@ void esPod::_timerTask(void *pvParameters)
                         if (esPodInstance->playStatus == PB_STATE_PLAYING
                             && esPodInstance->playStatusNotificationState == NOTIF_ON
                             && esPodInstance->trackChangeAckPending == 0x00) {
-                            L0x04::_0x27_PlayStatusNotification(esPodInstance, msg.cmdID, esPodInstance->getPlayPosition());
+                            uint32_t playPosition = esPodInstance->getPlayPosition();
+                            if (playPosition != esPodInstance->lastPlayPosition) {
+                                esPodInstance->lastPlayPosition = playPosition; 
+                                L0x04::_0x27_PlayStatusNotification(esPodInstance, msg.cmdID, playPosition);
+                            }
                         }
                     } else if (msg.cmdID == 0x01) {
                         // Playback track changed
@@ -319,21 +323,39 @@ void esPod::_timerTask(void *pvParameters)
                     esPodInstance->_pendingStatusNotificationCmdId = NO_PENDING_STATUS_NOTIFICATION;
                 }
             }
+            else if (msg.targetLingo == 0x29)
+            {
+                if (msg.cmdID == PB_CMD_SEEK_FF)
+                {
+#ifdef SEEK_CHANGES_VOLUME
+                    if (esPodInstance->_btSource) {
+                        ESP_LOGI(IPOD_TAG, "IBluetoothSource::volume_up()");
+                        esPodInstance->_btSource->volume_up();
+                    }
+#else
+                    if (esPodInstance->playStatus == PB_STATE_PLAYING && esPodInstance->_btSource) {
+                        ESP_LOGI(IPOD_TAG, "IBluetoothSource::fast_forward()");
+                        esPodInstance->_btSource->fast_forward();
+                    }
+#endif
+                }
+                else if (msg.cmdID == PB_CMD_SEEK_RW)
+                {
+#ifdef SEEK_CHANGES_VOLUME
+                    if (esPodInstance->_btSource) {
+                        ESP_LOGI(IPOD_TAG, "IBluetoothSource::volume_down()");
+                        esPodInstance->_btSource->volume_down();
+                    }
+#else
+                    if (esPodInstance->playStatus == PB_STATE_PLAYING && esPodInstance->_btSource) {
+                        ESP_LOGI(IPOD_TAG, "IBluetoothSource::rewind()");
+                        esPodInstance->_btSource->rewind();
+                    }
+#endif
+                }
+            }
         }
         vTaskDelay(pdMS_TO_TICKS(TIMER_INTERVAL_MS));
-    }
-}
-
-void esPod::scheduleNotification(TimerCallbackMessage *msg, uint32_t delay)
-{
-    if (_pendingStatusNotificationCmdId == NO_PENDING_STATUS_NOTIFICATION) {
-        _pendingStatusNotificationCmdId = msg->cmdID;
-        ESP_LOGI(IPOD_TAG, "Schedule status notification 0x%02x", msg->cmdID);
-
-        TickType_t delay_ticks = pdMS_TO_TICKS(delay);
-        xTimerChangePeriod(_notificationTimer, delay_ticks == 0 ? 1 : delay_ticks, 0);
-    } else {
-        ESP_LOGE(IPOD_TAG, "Schedule status notification 0x%02x failed, pending 0x%02x notification", msg->cmdID, _pendingStatusNotificationCmdId);
     }
 }
 
@@ -389,6 +411,15 @@ void esPod::_playPositionTimerCallback(TimerHandle_t xTimer)
 {
     esPod *esPodInstance = static_cast<esPod *>(pvTimerGetTimerID(xTimer));
     TimerCallbackMessage msg = { .cmdID = 0x04, .targetLingo = 0x27};
+    xQueueSendFromISR(esPodInstance->_timerQueue, &msg, NULL);
+}
+
+/// @brief Callback for PB_CMD timer
+/// @param xTimer
+void esPod::_pbCmdTimerCallback(TimerHandle_t xTimer)
+{
+    esPod *esPodInstance = static_cast<esPod *>(pvTimerGetTimerID(xTimer));
+    TimerCallbackMessage msg = { .cmdID = esPodInstance->_pbCmd, .targetLingo = 0x29};
     xQueueSendFromISR(esPodInstance->_timerQueue, &msg, NULL);
 }
 #pragma endregion
@@ -536,8 +567,10 @@ esPod::esPod(IUart &uart)
             _pendingTimer_0x04 = xTimerCreate("Pending Timer 0x04", pdMS_TO_TICKS(1000), pdFALSE, this, esPod::_pendingTimerCallback_0x04);
             _playPositionTimer = xTimerCreate("Play position Timer", pdMS_TO_TICKS(500), pdTRUE, this, esPod::_playPositionTimerCallback);
             _notificationTimer = xTimerCreate("Delayed status notification Timer", 1, pdFALSE, (void *)this, esPod::_notificationTimerTrampoline);
+            _pbCmdTimer = xTimerCreate("PB_CMD Timer", pdMS_TO_TICKS(250), pdTRUE, (void *)this, esPod::_pbCmdTimerCallback);
 
-            if (_pendingTimer_0x00 == NULL || _pendingTimer_0x03 == NULL || _pendingTimer_0x04 == NULL || _playPositionTimer == NULL || _notificationTimer == NULL) 
+            if (_pendingTimer_0x00 == NULL || _pendingTimer_0x03 == NULL || _pendingTimer_0x04 == NULL
+                || _playPositionTimer == NULL || _notificationTimer == NULL || _pbCmdTimer == NULL) 
             {
                 ESP_LOGE(IPOD_TAG, "Could not create timers");
             }
@@ -564,12 +597,14 @@ esPod::~esPod()
     stopTimer(_pendingTimer_0x04);
     stopTimer(_playPositionTimer);
     stopTimer(_notificationTimer);
+    stopTimer(_pbCmdTimer);
         
     xTimerDelete(_pendingTimer_0x00, 0);
     xTimerDelete(_pendingTimer_0x03, 0);
     xTimerDelete(_pendingTimer_0x04, 0);
     xTimerDelete(_playPositionTimer, 0);
     xTimerDelete(_notificationTimer, 0);
+    xTimerDelete(_pbCmdTimer, 0);
 
     // Remember to deallocate memory
     while (xQueueReceive(_cmdQueue, &tempCmd, 0) == pdTRUE)
@@ -646,11 +681,13 @@ void esPod::resetState()
     stopTimer(_pendingTimer_0x04);
     stopTimer(_playPositionTimer);
     stopTimer(_notificationTimer);
+    stopTimer(_pbCmdTimer);
 
     _pendingCmdId_0x00 = 0x00;
     _pendingCmdId_0x03 = 0x00;
     _pendingCmdId_0x04 = 0x00;
     _pendingStatusNotificationCmdId = NO_PENDING_STATUS_NOTIFICATION;
+    _pbCmd = 0x00;
 }
 
 void esPod::attachPlaybackSource(IBluetoothPlaybackSource &btSource)
@@ -752,17 +789,50 @@ void esPod::_applyTrackMetadata(const TrackMetadata *pending, byte direction)
                 trackChangeTimestamp = platform::time_now_ms();
                 L0x04::_0x27_PlayStatusNotification(this, 0x01, direction == PB_CMD_PREV ? 0 : TOTAL_NUM_TRACKS - 1);
             }
-
+#if 0
             uint32_t trackNotificationDelay = platform::time_now_ms() - trackChangeTimestamp;
-            if (trackNotificationDelay > 0 && trackNotificationDelay < TRACK_CHANGE_NOTIFICATION_TIMEOUT)
+            if (trackNotificationDelay >= 0 && trackNotificationDelay < TRACK_CHANGE_NOTIFICATION_TIMEOUT)
             {
                 vTaskDelay(pdMS_TO_TICKS(TRACK_CHANGE_NOTIFICATION_TIMEOUT - trackNotificationDelay));
             }
+#else
+            vTaskDelay(pdMS_TO_TICKS(TRACK_CHANGE_NOTIFICATION_TIMEOUT));
+#endif
 
             trackChangeCompletedTimestamp = platform::time_now_ms();
             currentTrackIndex = INVALID_TRACK_NUM;
 #endif
             L0x04::_0x27_PlayStatusNotification(this, 0x01, currentTrackIndex != INVALID_TRACK_NUM ? currentTrackIndex : START_INDEX);
+        }
+    }
+}
+
+void esPod::scheduleNotification(TimerCallbackMessage *msg, uint32_t delay)
+{
+    if (_pendingStatusNotificationCmdId == NO_PENDING_STATUS_NOTIFICATION) {
+        _pendingStatusNotificationCmdId = msg->cmdID;
+        ESP_LOGI(IPOD_TAG, "Schedule status notification 0x%02x", msg->cmdID);
+
+        TickType_t delay_ticks = pdMS_TO_TICKS(delay);
+        xTimerChangePeriod(_notificationTimer, delay_ticks == 0 ? 1 : delay_ticks, 0);
+    } else {
+        ESP_LOGE(IPOD_TAG, "Schedule status notification 0x%02x failed, pending 0x%02x notification", msg->cmdID, _pendingStatusNotificationCmdId);
+    }
+}
+
+void esPod::firePbCmdTimer(uint8_t pbCmd)
+{
+    if (pbCmd == PB_CMD_SEEK_FF || pbCmd == PB_CMD_SEEK_RW) {
+        _pbCmd = pbCmd;
+        if (xTimerIsTimerActive(_pbCmdTimer) != pdTRUE) {
+            ESP_LOGI(IPOD_TAG, "Start pbCmd timer");
+            xTimerStart(_pbCmdTimer, 0);
+        }
+    } else {
+        _pbCmd = 0x00;
+        if (xTimerIsTimerActive(_pbCmdTimer) == pdTRUE) {
+            ESP_LOGI(IPOD_TAG, "Stop pbCmd timer");
+            xTimerStop(_pbCmdTimer, 0);
         }
     }
 }

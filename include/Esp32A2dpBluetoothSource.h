@@ -42,6 +42,10 @@ public:
     void stop() override { _a2dp.stop(); }
     void next() override;
     void previous() override;
+    void fast_forward() override { _a2dp.fast_forward(); }
+    void rewind() override { _a2dp.rewind(); }
+    void volume_up() override { _a2dp.volume_up(); }
+    void volume_down() override { _a2dp.volume_down(); }
 
     bool isConnected() const override;
     void forgetConnection() override;

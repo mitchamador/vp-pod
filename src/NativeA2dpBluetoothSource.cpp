@@ -381,7 +381,7 @@ void NativeA2dpBluetoothSource::_avrcPlayPosTrampoline(uint32_t playPos)
     if (self == nullptr || self->_sink == nullptr)
         return;
 
-    ESP_LOGI("BT_SRC", "PlayPosition called");
+    ESP_LOGD("BT_SRC", "PlayPosition called");
 
 #ifdef TRACK_POSITION_FIX
     self->_lastRealPositionTimestamp = platform::time_now_ms();

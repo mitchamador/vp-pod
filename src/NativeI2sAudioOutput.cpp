@@ -41,8 +41,14 @@ void NativeI2sAudioOutput::begin(uint32_t sampleRate, uint8_t bitsPerSample, uin
     }
 
     i2s_slot_mode_t mono_or_stereo = (channels == 1) ? I2S_SLOT_MODE_MONO : I2S_SLOT_MODE_STEREO;
+    i2s_std_clk_config_t clk_cfg;
+    if (bitsPerSample == 24) {
+        clk_cfg = { .sample_rate_hz = sampleRate, .clk_src = I2S_CLK_SRC_DEFAULT, .mclk_multiple = I2S_MCLK_MULTIPLE_384, .bclk_div = 8 };
+    } else {
+        clk_cfg = I2S_STD_CLK_DEFAULT_CONFIG(sampleRate);
+    }
     i2s_std_config_t std_cfg = {
-        .clk_cfg = I2S_STD_CLK_DEFAULT_CONFIG(sampleRate),
+        .clk_cfg = clk_cfg,
         .slot_cfg = I2S_STD_PHILIPS_SLOT_DEFAULT_CONFIG(
             static_cast<i2s_data_bit_width_t>(bitsPerSample),
             mono_or_stereo),

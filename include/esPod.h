@@ -50,28 +50,29 @@ public:
     char fixedEmptyTrackTitle[255] = " ";
     char fixedPlaylist[255] = "now playing";
 
-    char fixedAlbumName[255] = "Album";
-    char fixedTrackGenre[255] = "Genre";
-    char fixedArtistName[255] = "Artist";
-    char fixedComposer[255] = "Composer";
+    char fixedAlbumName[255] = "album";
+    char fixedTrackGenre[255] = "genre";
+    char fixedArtistName[255] = "artist";
+    char fixedComposer[255] = "composer";
 #endif
 
-    char trackTitle[255] = "Title";
-    char albumName[255] = "Album";
-    char artistName[255] = "Artist";
+    char trackTitle[255] = "title";
+    char albumName[255] = "album";
+    char artistName[255] = "artist";
 #if TOTAL_NUM_TRACKS != 3
     char prevTrackTitle[255] = " ";
     char prevAlbumName[255] = " ";
     char prevArtistName[255] = " ";
 #endif
-    char trackGenre[255] = "Genre";
-    char playList[255] = "Spotify";
-    char composer[255] = "Composer";
+    char trackGenre[255] = "genre";
+    char playList[255] = "spotify";
+    char composer[255] = "composer";
     uint32_t trackDuration = 1; // Track duration in ms
 #if TOTAL_NUM_TRACKS != 3
     uint32_t prevTrackDuration = 1;
 #endif
     uint32_t playPosition = 0; // Current playing position of the track in ms
+    uint32_t lastPlayPosition = UINT32_MAX; // Last notified playing position of the track in ms
 
     // Playback Engine
     byte playStatus = PB_STATE_PAUSED;            // Current state of the PBEngine
@@ -101,6 +102,10 @@ public:
 
 #ifdef USE_PEER_NAME
     const char *_peer_name = nullptr;
+#endif
+
+#ifndef SEEK_CHANGES_VOLUME
+    uint8_t _pbCmdTickCount = 0;
 #endif
 
 private:
@@ -134,10 +139,14 @@ private:
     byte _pendingCmdId_0x03;
     byte _pendingCmdId_0x04;
 
-    // FreeRTOS timer for status change notification
+    // FreeRTOS timer and callback for status change notification
     TimerHandle_t _playPositionTimer;
-    // callback
     static void _playPositionTimerCallback(TimerHandle_t xTimer);
+
+    // FreeRTOS timer and callback for PB_CMD
+    TimerHandle_t _pbCmdTimer;
+    static void _pbCmdTimerCallback(TimerHandle_t xTimer);
+    byte _pbCmd;
 
 #define NO_PENDING_STATUS_NOTIFICATION 0xFF
     byte _pendingStatusNotificationCmdId = NO_PENDING_STATUS_NOTIFICATION;
@@ -189,4 +198,5 @@ public:
     void onPlayPosition(uint32_t positionMs) override;
 
     void scheduleNotification(TimerCallbackMessage *msg, uint32_t delay);
+    void firePbCmdTimer(uint8_t pbCmd);
  };

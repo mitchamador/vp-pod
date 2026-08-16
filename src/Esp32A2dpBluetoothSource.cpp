@@ -354,7 +354,7 @@ void Esp32A2dpBluetoothSource::_avrcPlayPosTrampoline(uint32_t playPos)
     if (self == nullptr || self->_sink == nullptr)
         return;
 
-    ESP_LOGI("BT_SRC", "PlayPosition called");
+    ESP_LOGD("BT_SRC", "PlayPosition called");
 
 #ifdef TRACK_POSITION_FIX
     // A real notification arrived - remember when, so the byte-based

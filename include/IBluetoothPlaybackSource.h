@@ -25,6 +25,10 @@ public:
     virtual void stop() = 0;
     virtual void next() = 0;
     virtual void previous() = 0;
+    virtual void fast_forward() = 0;
+    virtual void rewind() = 0;
+    virtual void volume_up() = 0;
+    virtual void volume_down() = 0;
 
     virtual bool isConnected() const = 0;
 
