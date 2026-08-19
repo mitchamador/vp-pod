@@ -7,7 +7,7 @@ Esp32I2sAudioOutput::Esp32I2sAudioOutput(I2SStream &i2s, int pinBck, int pinWs, 
 {
 }
 
-void Esp32I2sAudioOutput::begin(uint32_t sampleRate, uint8_t bitsPerSample, uint8_t channels)
+void Esp32I2sAudioOutput::doBegin(uint32_t sampleRate, uint8_t bitsPerSample, uint8_t channels)
 {
     auto cfg = _i2s.defaultConfig(TX_MODE);
     cfg.pin_bck = _pinBck;
@@ -20,12 +20,12 @@ void Esp32I2sAudioOutput::begin(uint32_t sampleRate, uint8_t bitsPerSample, uint
     _i2s.begin(cfg);
 }
 
-size_t Esp32I2sAudioOutput::write(const uint8_t *data, size_t length)
+size_t Esp32I2sAudioOutput::doWrite(const uint8_t *data, size_t length)
 {
     return _i2s.write(data, length);
 }
 
-void Esp32I2sAudioOutput::stop()
+void Esp32I2sAudioOutput::doStop()
 {
     // do nothing
 }

@@ -2,7 +2,7 @@
 
 #include "NativeA2dpBluetoothSink.h"
 
-#include "esPod_conf.h" // TRACK_POSITION_FIX / ZERO_VOLUME_FIX
+#include "esPod_conf.h" // ZERO_VOLUME_FIX
 #include "IBluetoothPlaybackSource.h"
 #include "IBluetoothSourceEvents.h"
 #include "IAudioOutput.h"
@@ -45,21 +45,6 @@ private:
     // Same reasoning as Esp32A2dpBluetoothSource: NativeA2DPSink callbacks
     // are plain C function pointers, so a static back-pointer is needed.
     static NativeA2dpBluetoothSource *_instance;
-
-#ifdef TRACK_POSITION_FIX
-    static constexpr uint32_t BYTES_PER_SECOND = 176400;
-    static constexpr uint32_t BYTES_POSITION_HUNK = BYTES_PER_SECOND / 2;
-    static constexpr uint32_t REAL_POSITION_STALE_MS = 3000;
-
-    volatile uint32_t _rawAudioDataBytesReceived = 0, _prevRawAudioDataBytesReceived = 0;
-    volatile bool _isPlaying = false;
-    volatile uint32_t _lastRealPositionTimestamp = UINT32_MAX;
-    void _resetPlayPositionEstimate()
-    {
-        _rawAudioDataBytesReceived = 0;
-        _prevRawAudioDataBytesReceived = 0;
-    }
-#endif
 
 #ifdef ZERO_VOLUME_FIX
     enum class VolumeState

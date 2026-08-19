@@ -19,7 +19,7 @@ namespace storage
 
     void setBool(const char *key, bool value)
     {
-        if (!NVS.setInt(key, value ? 1 : 0, true))
+        if (!NVS.setInt(key, (uint8_t) (value ? 1 : 0), true))
         {
             ESP_LOGE("storage", "failed to save %s to NVS", key);
         }

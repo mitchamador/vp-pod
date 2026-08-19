@@ -25,9 +25,9 @@ public:
     NativeI2sAudioOutput(i2s_port_t port, int pinBck, int pinWs, int pinDataOut);
     ~NativeI2sAudioOutput() override;
 
-    void begin(uint32_t sampleRate, uint8_t bitsPerSample, uint8_t channels) override;
-    size_t write(const uint8_t *data, size_t length) override;
-    void stop() override;
+    void doBegin(uint32_t sampleRate, uint8_t bitsPerSample, uint8_t channels) override;
+    size_t doWrite(const uint8_t *data, size_t length) override;
+    void doStop() override;
 
 private:
     i2s_port_t _port;

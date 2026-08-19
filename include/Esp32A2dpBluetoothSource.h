@@ -4,15 +4,14 @@
 #include "AudioTools.h"
 #include "BluetoothA2DPSink.h"
 
-#include "esPod_conf.h" // TRACK_POSITION_FIX / ZERO_VOLUME_FIX
+#include "esPod_conf.h" // ZERO_VOLUME_FIX
 #include "IBluetoothPlaybackSource.h"
 #include "IBluetoothSourceEvents.h"
 #include "IAudioOutput.h"
 
 /// @brief Bluetooth backend built on top of the ESP32-A2DP library
 /// (BluetoothA2DPSink). Owns everything that is specific to that library:
-/// AVRCP metadata parsing/queueing, connection/audio-state callbacks, the
-/// iOS play-position workaround (TRACK_POSITION_FIX) and the iOS
+/// AVRCP metadata parsing/queueing, connection/audio-state callbacks, iOS
 /// zero-volume-after-connect workaround (ZERO_VOLUME_FIX).
 ///
 /// esPod (and main.cpp) only see this class through IBluetoothPlaybackSource
@@ -62,27 +61,6 @@ private:
 
     volatile esp_a2d_connection_state_t _connectionState{};
 
-#ifdef TRACK_POSITION_FIX
-    // 44100Hz * 2 channels * 2 bytes (16-bit) = 176400 bytes per second
-    static constexpr uint32_t BYTES_PER_SECOND = 176400;
-    static constexpr uint32_t BYTES_POSITION_HUNK = BYTES_PER_SECOND / 2;
-    // If a real AVRC position notification arrived more recently than this,
-    // the byte-based estimate is suppressed in favor of the real value.
-    // Comfortably longer than the ~1s notify interval requested from the
-    // AVRC engine, so a phone that does support the real callback (unlike
-    // iOS) always wins.
-    static constexpr uint32_t REAL_POSITION_STALE_MS = 3000;
-
-    volatile uint32_t _rawAudioDataBytesReceived = 0, _prevRawAudioDataBytesReceived = 0;
-    volatile bool _isPlaying = false;
-    volatile uint32_t _lastRealPositionTimestamp = UINT32_MAX; // UINT32_MAX = "never received"
-    void _resetPlayPositionEstimate()
-    {
-        _rawAudioDataBytesReceived = 0;
-        _prevRawAudioDataBytesReceived = 0;
-    }
-#endif
-
 #ifdef ZERO_VOLUME_FIX
     enum class VolumeState
     {
@@ -118,9 +96,7 @@ private:
     static void _avrcVolumeChangeTrampoline(int volume);
     static void _avrcVolumeChangeCompletedTrampoline(int volume);
 #endif
-#if defined(TRACK_POSITION_FIX)
     static void _readDataStreamTrampoline(const uint8_t *data, uint32_t length);
-#endif
     static void _avrcTrackChangeTrampoline(uint8_t *uid);
 };
 

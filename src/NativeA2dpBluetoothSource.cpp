@@ -124,17 +124,15 @@ void NativeA2dpBluetoothSource::begin(const char *deviceName)
 void NativeA2dpBluetoothSource::next()
 {
     _a2dp.next();
-#ifdef TRACK_POSITION_FIX
-    _resetPlayPositionEstimate();
-#endif
+    if (_audioOutput != nullptr)
+        _audioOutput->_resetPlayPositionEstimate();
 }
 
 void NativeA2dpBluetoothSource::previous()
 {
     _a2dp.previous();
-#ifdef TRACK_POSITION_FIX
-    _resetPlayPositionEstimate();
-#endif
+    if (_audioOutput != nullptr)
+        _audioOutput->_resetPlayPositionEstimate();
 }
 
 bool NativeA2dpBluetoothSource::isConnected() const
@@ -217,9 +215,8 @@ void NativeA2dpBluetoothSource::_runProcessAvrcTask()
                 break;
             case ESP_AVRC_MD_ATTR_TITLE:
                 _filterPayload(pendingMetadata.title, (char *)incMetadata.payload);
-#ifdef TRACK_POSITION_FIX
-                _resetPlayPositionEstimate();
-#endif
+                if (_audioOutput != nullptr)
+                    _audioOutput->_resetPlayPositionEstimate();
                 break;
             case ESP_AVRC_MD_ATTR_ALBUM:
                 _filterPayload(pendingMetadata.album, (char *)incMetadata.payload);
@@ -332,21 +329,10 @@ void NativeA2dpBluetoothSource::_audioStateChangedTrampoline(esp_a2d_audio_state
         break;
     }
 
-#ifdef TRACK_POSITION_FIX
-    if (state == ESP_A2D_AUDIO_STATE_STARTED)
-    {
-        self->_isPlaying = true;
-    }
-    else if (state == ESP_A2D_AUDIO_STATE_STOPPED)
-    {
-        self->_isPlaying = false;
-        self->_resetPlayPositionEstimate();
-    }
-    else // ESP_A2D_AUDIO_STATE_REMOTE_SUSPEND (Paused)
-    {
-        self->_isPlaying = false;
-    }
-#endif
+    if (self->_audioOutput != nullptr)
+        self->_audioOutput->_updatePlayingState(state == ESP_A2D_AUDIO_STATE_STARTED ? PLAY_STATUS_PLAY :
+                                               (state == ESP_A2D_AUDIO_STATE_STOPPED ? PLAY_STATUS_STOP :
+                                                                                       PLAY_STATUS_PAUSE));
 }
 
 void NativeA2dpBluetoothSource::_avrcConnectionStateTrampoline(bool connected)
@@ -384,9 +370,8 @@ void NativeA2dpBluetoothSource::_avrcPlayPosTrampoline(uint32_t playPos)
 
     ESP_LOGD("BT_SRC", "PlayPosition called");
 
-#ifdef TRACK_POSITION_FIX
-    self->_lastRealPositionTimestamp = platform::time_now_ms();
-#endif
+    if (self->_audioOutput != nullptr)
+        self->_audioOutput->_updateLastRealPositionTimestamp();
     self->_sink->onPlayPosition(playPos);
 }
 
@@ -472,30 +457,13 @@ void NativeA2dpBluetoothSource::_streamReaderTrampoline(const uint8_t *data, uin
     if (self->_audioOutput != nullptr)
     {
         self->_audioOutput->write(data, length);
-    }
-
 #ifdef TRACK_POSITION_FIX
-    if (self->_isPlaying)
-    {
-        self->_rawAudioDataBytesReceived += length;
-        if (self->_rawAudioDataBytesReceived > self->_prevRawAudioDataBytesReceived + BYTES_POSITION_HUNK)
-        {
-            self->_prevRawAudioDataBytesReceived = self->_rawAudioDataBytesReceived;
-
-            bool realPositionRecent = self->_lastRealPositionTimestamp != UINT32_MAX &&
-                                       (platform::time_now_ms() - self->_lastRealPositionTimestamp) < REAL_POSITION_STALE_MS;
-
-            if (!realPositionRecent && self->_sink != nullptr)
-            {
-                uint32_t estimatedPositionMs = (uint32_t)(self->_rawAudioDataBytesReceived / (BYTES_PER_SECOND / 1000.0));
-                if (estimatedPositionMs > 500)
-                {
-                    self->_sink->onPlayPosition(estimatedPositionMs);
-                }
-            }
+        uint32_t estimatedPositionMs = self->_audioOutput->_getEstimatedPosition();
+        if (estimatedPositionMs > 0) {
+            self->_sink->onPlayPosition(estimatedPositionMs);
         }
-    }
 #endif
+    }
 }
 
 void NativeA2dpBluetoothSource::_codecConfigTrampoline(uint32_t rate, uint8_t bps, uint8_t channels)

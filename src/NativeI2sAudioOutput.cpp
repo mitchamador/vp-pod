@@ -18,7 +18,7 @@ NativeI2sAudioOutput::~NativeI2sAudioOutput()
     }
 }
 
-void NativeI2sAudioOutput::begin(uint32_t sampleRate, uint8_t bitsPerSample, uint8_t channels)
+void NativeI2sAudioOutput::doBegin(uint32_t sampleRate, uint8_t bitsPerSample, uint8_t channels)
 {
     if (_txChan != nullptr)
     {
@@ -87,7 +87,7 @@ void NativeI2sAudioOutput::begin(uint32_t sampleRate, uint8_t bitsPerSample, uin
     ESP_LOGI("I2S_OUT", "I2S configured: %uHz, %ubit, %uch", sampleRate, bitsPerSample, channels);
 }
 
-size_t NativeI2sAudioOutput::write(const uint8_t *data, size_t length)
+size_t NativeI2sAudioOutput::doWrite(const uint8_t *data, size_t length)
 {
     if (_txChan == nullptr)
         return 0;
@@ -97,7 +97,7 @@ size_t NativeI2sAudioOutput::write(const uint8_t *data, size_t length)
     return written;
 }
 
-void NativeI2sAudioOutput::stop()
+void NativeI2sAudioOutput::doStop()
 {
     // Disabling the channel discards whatever is still
     // queued in its DMA buffer - there's no separate "zero the buffer"
