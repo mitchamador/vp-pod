@@ -157,6 +157,7 @@ esPod espod(uart);
 void initializeSDCard();
 void initializeSerial();
 void initializeAudioOutput();
+void initializeStorage();
 #pragma endregion
 
 #ifndef ARDUINO
@@ -229,8 +230,7 @@ void setup()
 
 	initializeAudioOutput();
 
-	storage::init();
-	espod.loadSettingsFromStorage();
+	initializeStorage();
 
 	espod.attachPlaybackSource(btSource);
 
@@ -335,6 +335,15 @@ void initializeAudioOutput()
 	// is called from the Bluetooth backend itself (once at startup for
 	// Esp32A2dpBluetoothSource, or dynamically per codec-config-change for
 	// NativeA2dpBluetoothSource), not eagerly here.
+}
+
+/// @brief Initialises non volatile storage namespace and load settings
+void initializeStorage()
+{
+	storage::init();
+	espod.loadSettingsFromStorage();
+	btSource.loadSettingsFromStorage();
+	audioOutput.loadSettingsFromStorage();
 }
 
 #pragma endregion

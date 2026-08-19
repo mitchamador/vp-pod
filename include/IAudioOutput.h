@@ -3,6 +3,8 @@
 #include <stddef.h>
 #include <stdint.h>
 #include "platform.h"
+#include "esPod_conf.h"
+#include "SettingsKeys.h"
 
 enum PLAY_STATUS : uint8_t
 {
@@ -43,6 +45,8 @@ private:
     virtual void doStop() = 0;
 
 protected:
+    bool _trackPositionFixEnabled = TRACK_POSITION_FIX_DEFAULT;
+
     static constexpr uint32_t REAL_POSITION_STALE_MS = 3000;
     bool _isPlaying = false;
     uint64_t _rawAudioDataBytesReceived = 0;
@@ -56,7 +60,7 @@ protected:
     // source of play-position updates - throttled to roughly 2x/second.
     // When the real callback IS active and recent, back off and let it win.
     void updateEstimatedPosition(size_t length) {
-        if (!_isPlaying || _bytesPerSecond <= 0.0) return;
+        if (!_isPlaying || !_trackPositionFixEnabled || _bytesPerSecond <= 0.0) return;
 
         _rawAudioDataBytesReceived += length;
         
@@ -79,6 +83,10 @@ protected:
 
 public:
     virtual ~IAudioOutput() = default;
+
+    void loadSettingsFromStorage() {
+        _trackPositionFixEnabled = storage::getBool(SettingsKeys::TrackPositionFix, TRACK_POSITION_FIX_DEFAULT);
+    }
 
     void begin(uint32_t sampleRate, uint8_t bitsPerSample, uint8_t channels) {
         _bytesPerSecond = sampleRate * (bitsPerSample / 8.0) * channels;

@@ -868,7 +868,10 @@ void esPod::loadSettingsFromStorage()
 {
     _seekAsVolume = storage::getBool(SettingsKeys::SeekAsVolume, SEEK_MODE_DEFAULT_VOLUME);
     ESP_LOGI(IPOD_TAG, "Loaded settings: seekAsVolume=%d", _seekAsVolume);
-    // Next persisted setting - just another line here.
+    _usePeerName = storage::getBool(SettingsKeys::UsePeerName, USE_PEER_NAME_DEFAULT);
+    ESP_LOGI(IPOD_TAG, "Loaded settings: usePeerName=%d", _usePeerName);
+    _name = storage::getString(SettingsKeys::esPodName, ESPIPOD_NAME);
+    ESP_LOGI(IPOD_TAG, "Loaded settings: esPodName=%s", _name);
 }
 
 void esPod::setSeekAsVolume(bool value)

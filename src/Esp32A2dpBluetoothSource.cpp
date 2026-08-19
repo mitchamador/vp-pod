@@ -4,10 +4,6 @@
 #include "platform.h"
 #include <cstring>
 
-#ifdef ZERO_VOLUME_FIX
-#include "ArduinoNvs.h"
-#endif
-
 #ifndef AVRC_QUEUE_SIZE
 #define AVRC_QUEUE_SIZE 32
 #endif
@@ -69,11 +65,8 @@ void Esp32A2dpBluetoothSource::begin(const char *deviceName)
                                             ESP_AVRC_MD_ATTR_ALBUM | ESP_AVRC_MD_ATTR_PLAYING_TIME |
                                             ESP_AVRC_MD_ATTR_TRACK_NUM | ESP_AVRC_MD_ATTR_NUM_TRACKS);
     _a2dp.set_avrc_rn_play_pos_callback(_avrcPlayPosTrampoline, 1);
-#ifdef ZERO_VOLUME_FIX
     _a2dp.set_avrc_rn_volumechange(_avrcVolumeChangeTrampoline);
     _a2dp.set_avrc_rn_volumechange_completed(_avrcVolumeChangeCompletedTrampoline);
-    NVS.begin();
-#endif
     _a2dp.set_stream_reader(_readDataStreamTrampoline, false);
     _a2dp.set_avrc_rn_track_change_callback(_avrcTrackChangeTrampoline);
     _a2dp.start(deviceName);
@@ -216,6 +209,14 @@ void Esp32A2dpBluetoothSource::_runProcessAvrcTask()
     }
 }
 
+void Esp32A2dpBluetoothSource::doSetVolume(uint8_t volume) {
+    _a2dp.set_volume(volume);
+}
+
+uint8_t Esp32A2dpBluetoothSource::doGetVolume() {
+    return _a2dp.get_volume();
+}
+
 //-----------------------------------------------------------------------
 //|                  ESP32-A2DP callback trampolines                    |
 //-----------------------------------------------------------------------
@@ -239,9 +240,9 @@ void Esp32A2dpBluetoothSource::_connectionStateChangedTrampoline(esp_a2d_connect
     case ESP_A2D_CONNECTION_STATE_CONNECTED:
         self->_connectionState = state;
         ESP_LOGI("BT_SRC", "ESP_A2D_CONNECTION_STATE_CONNECTED");
-#ifdef ZERO_VOLUME_FIX
-        self->_volumeState = VolumeState::AfterConnectionNotDefined;
-#endif
+
+        self->_onConnected();
+
         if (self->_sink != nullptr)
         {
             self->_sink->onConnectionStateChanged(BtConnectionState::Connected);
@@ -278,29 +279,16 @@ void Esp32A2dpBluetoothSource::_audioStateChangedTrampoline(esp_a2d_audio_state_
     switch (state)
     {
     case ESP_A2D_AUDIO_STATE_STARTED:
-#ifdef ZERO_VOLUME_FIX
-        if (self->_volumeState == VolumeState::AfterConnectionNotDefined)
-        {
-            self->_volumeState = VolumeState::AfterConnectionSet;
-            ESP_LOGI("BT_SRC", "Volume is not set after connecting. Restore volume to saved value");
-            self->_a2dp.set_volume(_nvsGetVolume());
-        }
-#endif
         ESP_LOGI("BT_SRC", "ESP_A2D_AUDIO_STATE_STARTED");
+        self->_restoreVolume(INVALID_VOLUME);
         if (self->_sink != nullptr)
-        {
             self->_sink->onPlayStateChanged(BtPlayState::Playing);
-        }
         break;
     case ESP_A2D_AUDIO_STATE_SUSPEND:
         ESP_LOGI("BT_SRC", "ESP_A2D_AUDIO_STATE_REMOTE_SUSPEND");
         if (self->_sink != nullptr)
-        {
             self->_sink->onPlayStateChanged(BtPlayState::Paused);
-        }
-#ifdef ZERO_VOLUME_FIX
-        _nvsSetVolume(self->_a2dp.get_volume());
-#endif
+        self->_saveVolume();
         break;
     }
 
@@ -347,27 +335,6 @@ void Esp32A2dpBluetoothSource::_avrcPlayPosTrampoline(uint32_t playPos)
     self->_sink->onPlayPosition(playPos);
 }
 
-#ifdef ZERO_VOLUME_FIX
-
-uint8_t Esp32A2dpBluetoothSource::_nvsGetVolume()
-{
-    uint8_t volume = NVS.getInt("volume", 32);
-    ESP_LOGI("BT_SRC", "get volume from NVS: %d", volume);
-    return volume;
-}
-
-void Esp32A2dpBluetoothSource::_nvsSetVolume(uint8_t volume)
-{
-    if (volume != _nvsGetVolume())
-    {
-        if (!NVS.setInt("volume", volume, true)) {
-            ESP_LOGE("BT_SRC", "failed to save volume to NVS");
-        } else {
-            ESP_LOGI("BT_SRC", "set volume to NVS: %d", volume);
-        }
-    }
-}
-
 void Esp32A2dpBluetoothSource::_avrcVolumeChangeTrampoline(int volume)
 {
     auto *self = _instance;
@@ -375,27 +342,14 @@ void Esp32A2dpBluetoothSource::_avrcVolumeChangeTrampoline(int volume)
         return;
 
     ESP_LOGD("BT_SRC", "Volume change: %d%%", (int)volume * 100 / 0x7f);
-    if (self->_volumeState == VolumeState::AfterConnectionNotDefined)
-    {
-        self->_volumeState = VolumeState::AfterConnectionSet;
-        if (volume == 0)
-        {
-            uint8_t saved_volume = _nvsGetVolume();
-            if (volume != saved_volume)
-            {
-                ESP_LOGI("BT_SRC", "Volume is set to 0 after connecting. Restore volume to saved value");
-                self->_a2dp.set_volume(saved_volume);
-            }
-        }
-    }
+
+    self->_restoreVolume(volume);
 }
 
 void Esp32A2dpBluetoothSource::_avrcVolumeChangeCompletedTrampoline(int volume)
 {
     ESP_LOGD("BT_SRC", "Volume change completed: %d%%", (int)volume * 100 / 0x7f);
 }
-
-#endif
 
 void Esp32A2dpBluetoothSource::_readDataStreamTrampoline(const uint8_t *data, uint32_t length)
 {
@@ -407,12 +361,10 @@ void Esp32A2dpBluetoothSource::_readDataStreamTrampoline(const uint8_t *data, ui
     if (self->_audioOutput != nullptr)
     {
         self->_audioOutput->write(data, length);
-#ifdef TRACK_POSITION_FIX
         uint32_t estimatedPositionMs = self->_audioOutput->_getEstimatedPosition();
         if (estimatedPositionMs > 0) {
             self->_sink->onPlayPosition(estimatedPositionMs);
         }
-#endif
     }
 #endif
 }

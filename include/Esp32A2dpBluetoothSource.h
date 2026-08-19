@@ -4,15 +4,13 @@
 #include "AudioTools.h"
 #include "BluetoothA2DPSink.h"
 
-#include "esPod_conf.h" // ZERO_VOLUME_FIX
 #include "IBluetoothPlaybackSource.h"
 #include "IBluetoothSourceEvents.h"
 #include "IAudioOutput.h"
 
 /// @brief Bluetooth backend built on top of the ESP32-A2DP library
 /// (BluetoothA2DPSink). Owns everything that is specific to that library:
-/// AVRCP metadata parsing/queueing, connection/audio-state callbacks, iOS
-/// zero-volume-after-connect workaround (ZERO_VOLUME_FIX).
+/// AVRCP metadata parsing/queueing, connection/audio-state callbacks.
 ///
 /// esPod (and main.cpp) only see this class through IBluetoothPlaybackSource
 /// / IBluetoothSourceEvents - none of the A2DP/AVRCP specifics leak out.
@@ -49,6 +47,9 @@ public:
     bool isConnected() const override;
     void forgetConnection() override;
 
+    void doSetVolume(uint8_t volume) override;
+    uint8_t doGetVolume() override;
+
 private:
     BluetoothA2DPSink &_a2dp;
     IAudioOutput *_audioOutput = nullptr;
@@ -61,25 +62,6 @@ private:
 
     volatile esp_a2d_connection_state_t _connectionState{};
 
-#ifdef ZERO_VOLUME_FIX
-    enum class VolumeState
-    {
-        AfterConnectionNotDefined,
-        AfterConnectionSet
-    };
-    VolumeState _volumeState = VolumeState::AfterConnectionNotDefined;
-    static uint8_t _nvsGetVolume();
-    static void _nvsSetVolume(uint8_t volume);
-#endif
-
-    // AVRC metadata is delivered attribute-by-attribute via a C callback
-    // from a Bluetooth stack task; we queue it and coalesce it into a single
-    // TrackMetadata update on a dedicated FreeRTOS task, same as before.
-    struct AvrcMetadataItem
-    {
-        uint8_t id = 0;
-        uint8_t *payload = nullptr;
-    };
     QueueHandle_t _avrcMetadataQueue = nullptr;
     TaskHandle_t _processAvrcTaskHandle = nullptr;
     static void _processAvrcTask(void *pvParameters);
@@ -92,10 +74,8 @@ private:
     static void _avrcConnectionStateTrampoline(bool connected);
     static void _avrcMetadataTrampoline(uint8_t id, const uint8_t *text);
     static void _avrcPlayPosTrampoline(uint32_t playPos);
-#ifdef ZERO_VOLUME_FIX
     static void _avrcVolumeChangeTrampoline(int volume);
     static void _avrcVolumeChangeCompletedTrampoline(int volume);
-#endif
     static void _readDataStreamTrampoline(const uint8_t *data, uint32_t length);
     static void _avrcTrackChangeTrampoline(uint8_t *uid);
 };

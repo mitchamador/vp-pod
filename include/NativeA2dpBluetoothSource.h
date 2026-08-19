@@ -2,7 +2,6 @@
 
 #include "NativeA2dpBluetoothSink.h"
 
-#include "esPod_conf.h" // ZERO_VOLUME_FIX
 #include "IBluetoothPlaybackSource.h"
 #include "IBluetoothSourceEvents.h"
 #include "IAudioOutput.h"
@@ -37,6 +36,9 @@ public:
     bool isConnected() const override;
     void forgetConnection() override;
 
+    void doSetVolume(uint8_t volume) override;
+    uint8_t doGetVolume() override;
+
 private:
     NativeA2DPSink &_a2dp;
     IAudioOutput *_audioOutput = nullptr;
@@ -46,26 +48,6 @@ private:
     // are plain C function pointers, so a static back-pointer is needed.
     static NativeA2dpBluetoothSource *_instance;
 
-#ifdef ZERO_VOLUME_FIX
-    enum class VolumeState
-    {
-        AfterConnectionNotDefined,
-        AfterConnectionSet
-    };
-    VolumeState _volumeState = VolumeState::AfterConnectionNotDefined;
-    static uint8_t _nvsGetVolume();
-    static void _nvsSetVolume(uint8_t volume);
-#endif
-
-    // Same metadata coalescing approach as Esp32A2dpBluetoothSource: the
-    // native sink's metadata callback fires once per attribute (title,
-    // artist, ...) in a burst after a track-change notification; we queue
-    // and debounce them into a single TrackMetadata update.
-    struct AvrcMetadataItem
-    {
-        uint8_t id = 0;
-        uint8_t *payload = nullptr;
-    };
     QueueHandle_t _avrcMetadataQueue = nullptr;
     TaskHandle_t _processAvrcTaskHandle = nullptr;
     static void _processAvrcTask(void *pvParameters);
@@ -78,10 +60,8 @@ private:
     static void _avrcConnectionStateTrampoline(bool connected);
     static void _avrcMetadataTrampoline(uint8_t id, const uint8_t *text);
     static void _avrcPlayPosTrampoline(uint32_t playPos);
-#ifdef ZERO_VOLUME_FIX
     static void _avrcVolumeChangeTrampoline(int volume);
     static void _avrcVolumeChangeCompletedTrampoline(int volume);
-#endif
     static void _streamReaderTrampoline(const uint8_t *data, uint32_t length);
     static void _codecConfigTrampoline(uint32_t rate, uint8_t bps, uint8_t channels);
     static void _avrcTrackChangeTrampoline(uint8_t *uid);

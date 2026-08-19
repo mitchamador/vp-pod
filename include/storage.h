@@ -1,6 +1,7 @@
 #pragma once
 
 #include <stdint.h>
+#include <string>
 
 /// @brief Platform-agnostic persistent settings storage (NVS on both
 /// Arduino and native ESP-IDF) - same reasoning as platform::: a single
@@ -19,4 +20,10 @@ namespace storage
 
     bool getBool(const char *key, bool defaultValue);
     void setBool(const char *key, bool value);
+    int getInt(const char *key, int defaultValue);
+    void setInt(const char *key, int value);
+
+    std::string getString(const char *key, const char *defaultValue = "");
+    void setString(const char *key, const char *value);
+    void setString(const char *key, const std::string &value);
 }

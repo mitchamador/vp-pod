@@ -21,14 +21,7 @@ typedef uint8_t byte;
 #include "platform.h"
 #include "IBluetoothPlaybackSource.h"
 #include "IBluetoothSourceEvents.h"
-#include "storage.h"
-
-namespace SettingsKeys
-{
-    constexpr const char *SeekAsVolume = "seek_as_vol";
-    // Next persisted setting - just another line here, plus one more in
-    // esPod::loadSettingsFromStorage().
-}
+#include "SettingsKeys.h"
 
 #ifndef IPOD_TAG
 #define IPOD_TAG "esPod"
@@ -108,7 +101,7 @@ public:
     bool _firstPbCmdToggle = false;
 #endif
 
-    // USE_PEER_NAME
+    bool _usePeerName = USE_PEER_NAME_DEFAULT;
     const char *_peer_name = nullptr;
 
     // Runtime seek mode (see SEEK_MODE_DEFAULT_VOLUME/SEEK_MODE_TOGGLE_WINDOW_MS
@@ -188,7 +181,7 @@ private:
     bool _rxIncomplete = false;
 
     // Device metadata
-    const char *_name = ESPIPOD_NAME;
+    std::string _name = ESPIPOD_NAME;
     const uint8_t _SWMajor = 0x01;
     const uint8_t _SWMinor = 0x03;
     const uint8_t _SWrevision = 0x00;

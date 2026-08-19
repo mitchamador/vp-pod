@@ -257,9 +257,7 @@ void L0x00::_0x04_ReturnExtendedInterfaceMode(esPod *esp, byte extendedModeByte)
 /// @param esp Pointer to the esPod instance
 void L0x00::_0x08_ReturniPodName(esPod *esp)
 {
-//#ifdef USE_PEER_NAME
-    const char *espName = esp->_peer_name;    
-//    const char *espName = esp->_name;    
+    const char *espName = esp->_usePeerName ? esp->_peer_name : esp->_name.c_str();    
     ESP_LOGI(IPOD_TAG, "Name: %s", espName);
     byte txPacket[255] = {// Prealloc to len = FF
                           0x00,

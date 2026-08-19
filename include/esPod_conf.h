@@ -2,16 +2,25 @@
 
 // vpPod
 #ifdef VPPOD
-#define ZERO_VOLUME_FIX
-#define TRACK_POSITION_FIX
 #define TOTAL_NUM_TRACKS 3
 #define SINGLE_DB_CAT_TRACKS
 #define START_INDEX 1
 #define ESPIPOD_NAME "vp-pod"
+#endif
+
 #define TRACK_CHANGE_NOTIFICATION_TIMEOUT 750
 #define FIRST_TIME_TRACK_CHANGE_NOTIFICATION_TIMEOUT 2000
 #define SKIP_PLAYCURRENT_TIMEOUT 1500
 #define FORCED_TRACK_CHANGE_TIMEOUT 1500
+
+#ifndef ARDUINO
+#define LED_BUILTIN 2
+#endif
+
+// #define USE_ESP_IDF_SERIAL
+// #define USE_ESP_IDF_TIME
+// #define USE_ESP_IDF_GPIO
+
 // Seek mode (fast_forward()/rewind() vs. volume_up()/volume_down() as an
 // iOS workaround - AVRCP FF/REW clicks are simply ignored there) is now a
 // runtime flag (esPod::_seekAsVolume), not a build-time #define - see
@@ -25,19 +34,19 @@
 #ifndef SEEK_MODE_TOGGLE_WINDOW_MS
 #define SEEK_MODE_TOGGLE_WINDOW_MS 3000
 #endif
-
-#ifndef ARDUINO
-#define LED_BUILTIN 2
+// default value for TRACK_POSITION_FIX
+#ifndef TRACK_POSITION_FIX_DEFAULT
+#define TRACK_POSITION_FIX_DEFAULT true
+#endif
+// default value for ZERO_VOLUME_FIX
+#ifndef ZERO_VOLUME_FIX_DEFAULT
+#define ZERO_VOLUME_FIX_DEFAULT true
+#endif
+// default value for USE_PEER_NAME
+#ifndef USE_PEER_NAME_DEFAULT
+#define USE_PEER_NAME_DEFAULT true
 #endif
 
-// #define USE_ESP_IDF_SERIAL
-// #define USE_ESP_IDF_TIME
-// #define USE_ESP_IDF_GPIO
-
-//@DEPRECATED
-//#define AUTOPLAY_AFTER_CONNECT
-
-#endif
 
 // A2DP instance name
 #ifndef A2DP_SINK_NAME
