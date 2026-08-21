@@ -16,6 +16,8 @@ Unlike a generic A2DP receiver, this project is focused on seamless integration 
 * Playlist navigation with **Previous / Current / Next** track support
 * Improved metadata synchronization for reliable track change notifications
 * Audio output automatically reconfigures to the negotiated sample rate/bit depth/channel count, rather than assuming fixed CD-quality SBC
+* Persistent, runtime-configurable settings (seek-as-volume, peer-name usage, track-position and zero-volume workarounds, suspend timeout, ...) stored in NVS — no longer build-time-only `#define`s
+* `Disabled` / `Suspended` / `Enabled` connection state machine: a brief Bluetooth dropout no longer causes the MMI to switch away from the active source — DCD stays asserted and UART keeps responding until a configurable grace period elapses
 * Platform abstraction layer to simplify migration from Arduino to ESP-IDF
 
 ## Project goals
@@ -48,6 +50,7 @@ The project is being gradually refactored into independent modules, each exposed
 * **Audio output** (`IAudioOutput`) — where decoded PCM actually goes, reconfigurable on the fly as the negotiated codec format changes:
   * `Esp32I2sAudioOutput` (AudioTools `I2SStream`)
   * `NativeI2sAudioOutput` (ESP-IDF `i2s_std` driver)
+* **Persistent settings** (`storage::` namespace) — get/set bool/int/string values backed by NVS on both Arduino (`ArduinoNvs`) and native (`nvs_*` APIs); each component (`esPod`, Bluetooth backend, audio output) loads its own settings via an explicit `loadSettingsFromStorage()` rather than reading storage from a constructor, since globals are constructed before NVS is ready
 
 The iAP core (`esPod` and the `L0x0x` command handlers) talks only to these interfaces and has no knowledge of Arduino, a specific Bluetooth library, or a specific I2S driver.
 
@@ -62,7 +65,7 @@ Current work is mainly focused on:
 * migrating off deprecated ESP-IDF APIs (legacy I2S driver already replaced with `i2s_std`);
 * unifying code style across the codebase;
 * improving AVRCP metadata handling;
-* longer-term: a platform-independent settings-storage layer, and runtime (web-based) configuration in place of today's build-time `#define`s.
+* a web-based configuration UI, now that settings are persisted at runtime (`storage::`) rather than build-time `#define`s.
 
 ## Build
 

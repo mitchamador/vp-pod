@@ -39,7 +39,7 @@ void esPod::_rxTask(void *pvParameters)
 #endif
 
         // If the esPod is disabled, flush the RX buffer and wait for 2*RX_TASK_INTERVAL_MS before checking again
-        if (esPodInstance->disabled)
+        if (esPodInstance->isDisabled())
         {
             while (esPodInstance->_uart.available())
             {
@@ -175,7 +175,7 @@ void esPod::_processTask(void *pvParameters)
 #endif
 
         // If the esPod is disabled, check the queue and purge it before jumping to the next cycle
-        if (esPodInstance->disabled)
+        if (esPodInstance->isDisabled())
         {
             while (xQueueReceive(esPodInstance->_cmdQueue, &incCmd, 0) == pdTRUE) // Non blocking receive
             {
@@ -225,7 +225,7 @@ void esPod::_txTask(void *pvParameters)
 #endif
 
         // If the esPod is disabled, check the queue and purge it before jumping to the next cycle
-        if (esPodInstance->disabled)
+        if (esPodInstance->isDisabled())
         {
             while (xQueueReceive(esPodInstance->_txQueue, &txCmd, 0) == pdTRUE)
             {
@@ -350,6 +350,13 @@ void esPod::_timerTask(void *pvParameters)
                     }
                 }
             }
+            else if (msg.targetLingo == INTERNAL_LINGO)
+            {
+                if (msg.cmdID == INTERNAL_EVT_SUSPEND_TIMEOUT)
+                    esPodInstance->_enterDisabled();
+                else if (msg.cmdID == INTERNAL_EVT_REENABLE_SETTLE)
+                    esPodInstance->_enterEnabled();
+            }
         }
         vTaskDelay(pdMS_TO_TICKS(TIMER_INTERVAL_MS));
     }
@@ -416,6 +423,25 @@ void esPod::_pbCmdTimerCallback(TimerHandle_t xTimer)
 {
     esPod *esPodInstance = static_cast<esPod *>(pvTimerGetTimerID(xTimer));
     TimerCallbackMessage msg = { .cmdID = esPodInstance->_pbCmd, .targetLingo = 0x29};
+    xQueueSendFromISR(esPodInstance->_timerQueue, &msg, NULL);
+}
+
+/// @brief Callback for the Suspended->Disabled grace-period timer
+/// @param xTimer
+void esPod::_suspendTimerCallback(TimerHandle_t xTimer)
+{
+    esPod *esPodInstance = static_cast<esPod *>(pvTimerGetTimerID(xTimer));
+    TimerCallbackMessage msg = { .cmdID = INTERNAL_EVT_SUSPEND_TIMEOUT, .targetLingo = INTERNAL_LINGO };
+    xQueueSendFromISR(esPodInstance->_timerQueue, &msg, NULL);
+}
+
+/// @brief Callback for the Disabled->Enabled settle-pause timer (used when
+/// a different peer reconnects while Suspended)
+/// @param xTimer
+void esPod::_reenableSettleTimerCallback(TimerHandle_t xTimer)
+{
+    esPod *esPodInstance = static_cast<esPod *>(pvTimerGetTimerID(xTimer));
+    TimerCallbackMessage msg = { .cmdID = INTERNAL_EVT_REENABLE_SETTLE, .targetLingo = INTERNAL_LINGO };
     xQueueSendFromISR(esPodInstance->_timerQueue, &msg, NULL);
 }
 #pragma endregion
@@ -564,9 +590,12 @@ esPod::esPod(IUart &uart)
             _playPositionTimer = xTimerCreate("Play position Timer", pdMS_TO_TICKS(500), pdTRUE, this, esPod::_playPositionTimerCallback);
             _notificationTimer = xTimerCreate("Delayed status notification Timer", 1, pdFALSE, (void *)this, esPod::_notificationTimerTrampoline);
             _pbCmdTimer = xTimerCreate("PB_CMD Timer", pdMS_TO_TICKS(250), pdTRUE, (void *)this, esPod::_pbCmdTimerCallback);
+            _suspendTimer = xTimerCreate("Suspend Timer", pdMS_TO_TICKS(SUSPEND_TIMEOUT_S_DEFAULT * 1000UL), pdFALSE, this, esPod::_suspendTimerCallback);
+            _reenableSettleTimer = xTimerCreate("Reenable Settle Timer", pdMS_TO_TICKS(REENABLE_SETTLE_MS_DEFAULT), pdFALSE, this, esPod::_reenableSettleTimerCallback);
 
             if (_pendingTimer_0x00 == NULL || _pendingTimer_0x03 == NULL || _pendingTimer_0x04 == NULL
-                || _playPositionTimer == NULL || _notificationTimer == NULL || _pbCmdTimer == NULL) 
+                || _playPositionTimer == NULL || _notificationTimer == NULL || _pbCmdTimer == NULL
+                || _suspendTimer == NULL || _reenableSettleTimer == NULL) 
             {
                 ESP_LOGE(IPOD_TAG, "Could not create timers");
             }
@@ -594,6 +623,8 @@ esPod::~esPod()
     stopTimer(_playPositionTimer);
     stopTimer(_notificationTimer);
     stopTimer(_pbCmdTimer);
+    stopTimer(_suspendTimer);
+    stopTimer(_reenableSettleTimer);
         
     xTimerDelete(_pendingTimer_0x00, 0);
     xTimerDelete(_pendingTimer_0x03, 0);
@@ -601,6 +632,8 @@ esPod::~esPod()
     xTimerDelete(_playPositionTimer, 0);
     xTimerDelete(_notificationTimer, 0);
     xTimerDelete(_pbCmdTimer, 0);
+    xTimerDelete(_suspendTimer, 0);
+    xTimerDelete(_reenableSettleTimer, 0);
 
     // Remember to deallocate memory
     while (xQueueReceive(_cmdQueue, &tempCmd, 0) == pdTRUE)
@@ -679,6 +712,8 @@ void esPod::resetState()
     stopTimer(_playPositionTimer);
     stopTimer(_notificationTimer);
     stopTimer(_pbCmdTimer);
+    stopTimer(_suspendTimer);
+    stopTimer(_reenableSettleTimer);
 
     _pendingCmdId_0x00 = 0x00;
     _pendingCmdId_0x03 = 0x00;
@@ -706,15 +741,12 @@ void esPod::onConnectionStateChanged(BtConnectionState state)
     switch (state)
     {
     case BtConnectionState::Connecting:
-        break;
+        break; // identity not known yet - wait for Connected + onPeerAddressChanged
     case BtConnectionState::Connected:
-        ESP_LOGI(IPOD_TAG, "Bluetooth connected, espod enabled");
-        disabled = false;
+        _handleBtConnected();
         break;
     case BtConnectionState::Disconnected:
-        ESP_LOGI(IPOD_TAG, "Bluetooth disconnected, espod disabled");
-        resetState();
-        disabled = true;
+        _handleBtDisconnected();
         break;
     }
 }
@@ -725,9 +757,101 @@ void esPod::onPeerNameChanged(const char *peerName)
     ESP_LOGI(IPOD_TAG, "Peer connected: %s", peerName);
 }
 
+void esPod::onPeerAddressChanged(const uint8_t bdAddr[6])
+{
+    bool sameDevice = _hasLastPeerAddress && memcmp(_lastPeerAddress, bdAddr, 6) == 0;
+    memcpy(_lastPeerAddress, bdAddr, 6);
+    _hasLastPeerAddress = true;
+
+    if (_state != EspodState::Suspended)
+        return; // fresh connect from Disabled - handled in _handleBtConnected
+
+    stopTimer(_suspendTimer);
+
+    if (sameDevice)
+    {
+        ESP_LOGI(IPOD_TAG, "Reconnected same peer while suspended - resuming session");
+        _enterEnabled();
+    }
+    else
+    {
+        ESP_LOGI(IPOD_TAG, "Reconnected different peer while suspended - forcing clean state");
+        _enterDisabled();
+        startTimer(_reenableSettleTimer, REENABLE_SETTLE_MS_DEFAULT);
+    }
+}
+
+void esPod::_handleBtConnected()
+{
+    if (_state == EspodState::Disabled)
+    {
+        ESP_LOGI(IPOD_TAG, "Bluetooth connected, espod enabled");
+        _enterEnabled();
+    }
+    // if _state == Suspended, onPeerAddressChanged (fired right after this)
+    // makes the actual same/different-peer decision
+}
+
+void esPod::_handleBtDisconnected()
+{
+    if (_explicitDisconnectPending)
+    {
+        _explicitDisconnectPending = false;
+        bool withinWindow = (platform::time_now_ms() - _explicitDisconnectRequestedAt) < EXPLICIT_DISCONNECT_WINDOW_MS;
+        if (withinWindow)
+        {
+            ESP_LOGI(IPOD_TAG, "Explicit disconnect, espod disabled (no suspend grace period)");
+            stopTimer(_suspendTimer);
+            _enterDisabled();
+            return;
+        }
+        // stale flag (forgetConnection() was likely called with no active
+        // session to actually tear down) - fall through to normal handling
+    }
+
+    if (_state == EspodState::Suspended)
+        return; // failed reconnect attempt - keep the original grace window running
+
+    if (_state == EspodState::Enabled)
+    {
+        ESP_LOGI(IPOD_TAG, "Bluetooth disconnected, espod suspended for up to %lus", (unsigned long)_suspendTimeoutSec);
+        _enterSuspended();
+    }
+}
+
+void esPod::_enterSuspended()
+{
+    _state = EspodState::Suspended;
+    playStatus = PB_STATE_PAUSED; // no real audio source while suspended
+    stopTimer(_pbCmdTimer);       // nothing to send FF/REW clicks to
+    startTimer(_suspendTimer, _suspendTimeoutSec * 1000UL);
+}
+
+void esPod::_enterDisabled()
+{
+    stopTimer(_suspendTimer);
+    _state = EspodState::Disabled;
+    resetState();
+}
+
+void esPod::_enterEnabled()
+{
+    stopTimer(_suspendTimer);
+    stopTimer(_reenableSettleTimer);
+    _state = EspodState::Enabled;
+}
+
+void esPod::forgetBtConnection()
+{
+    if (_btSource == nullptr) return;
+    _explicitDisconnectPending = true;
+    _explicitDisconnectRequestedAt = platform::time_now_ms();
+    _btSource->forgetConnection();
+}
+
 void esPod::onPlayStateChanged(BtPlayState state)
 {
-    playStatus = (state == BtPlayState::Playing && !disabled) ? PB_STATE_PLAYING : PB_STATE_PAUSED;
+    playStatus = (state == BtPlayState::Playing && _state == EspodState::Enabled) ? PB_STATE_PLAYING : PB_STATE_PAUSED;
     ESP_LOGI(IPOD_TAG, "Bluetooth play state changed, playStatus = %d", playStatus);
 }
 
@@ -871,7 +995,9 @@ void esPod::loadSettingsFromStorage()
     _usePeerName = storage::getBool(SettingsKeys::UsePeerName, USE_PEER_NAME_DEFAULT);
     ESP_LOGI(IPOD_TAG, "Loaded settings: usePeerName=%d", _usePeerName);
     _name = storage::getString(SettingsKeys::esPodName, ESPIPOD_NAME);
-    ESP_LOGI(IPOD_TAG, "Loaded settings: esPodName=%s", _name);
+    ESP_LOGI(IPOD_TAG, "Loaded settings: esPodName=%s", _name.c_str());
+    _suspendTimeoutSec = storage::getInt(SettingsKeys::SuspendTimeoutSec, SUSPEND_TIMEOUT_S_DEFAULT);
+    ESP_LOGI(IPOD_TAG, "Loaded settings: suspendTimeoutSec=%lu", (unsigned long)_suspendTimeoutSec);
 }
 
 void esPod::setSeekAsVolume(bool value)

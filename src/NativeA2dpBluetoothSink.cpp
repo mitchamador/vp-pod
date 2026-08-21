@@ -51,11 +51,11 @@ void NativeA2DPSink::init_bluetooth() {
     // Bluetooth controller and bluedroid are initialized centrally in main.cpp
     // to avoid double-init when both BLE and Classic BT (A2DP) are used.
     esp_bt_sp_param_t param_type = ESP_BT_SP_IOCAP_MODE;
-    esp_bt_io_cap_t iocap = ESP_BT_IO_CAP_IO;
+    esp_bt_io_cap_t iocap = ESP_BT_IO_CAP_NONE;
     esp_bt_gap_set_security_param(param_type, &iocap, sizeof(uint8_t));
     esp_bt_pin_type_t pin_type = ESP_BT_PIN_TYPE_FIXED;
-    esp_bt_pin_code_t pin_code; pin_code[0]='1'; pin_code[1]='2'; pin_code[2]='3'; pin_code[3]='4';
-    esp_bt_gap_set_pin(pin_type, 4, pin_code);
+    esp_bt_pin_code_t pin_code /*= {'1', '2', '3', '4'}*/;
+    esp_bt_gap_set_pin(pin_type, 0, pin_code);
 }
 
 void NativeA2DPSink::start(const char *name) {

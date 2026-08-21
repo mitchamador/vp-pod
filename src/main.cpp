@@ -258,7 +258,7 @@ void loop()
 			if (!clean_last_connection && platform::time_now_ms() - start_key_pressed > 10000)
 			{
 				ESP_LOGI("MAIN", "Clean last connection");
-				btSource.forgetConnection();
+				espod.forgetBtConnection();
 				clean_last_connection = true;
 			}
 		}
@@ -275,10 +275,10 @@ void loop()
 #endif
 
 #ifdef LED_BUILTIN
-  	platform::gpio_write(LED_BUILTIN, INVERT_LED_LOGIC(espod.disabled ? platform::PinLevel::Low : platform::PinLevel::High));
+  	platform::gpio_write(LED_BUILTIN, INVERT_LED_LOGIC(espod.isDisabled() ? platform::PinLevel::Low : platform::PinLevel::High));
 #endif
 #ifdef ENABLE_ACTIVE_DCD
-	platform::gpio_write(DCD_CTRL_PIN, INVERT_DCD_LOGIC(espod.disabled ? platform::PinLevel::High : platform::PinLevel::Low));
+	platform::gpio_write(DCD_CTRL_PIN, INVERT_DCD_LOGIC(espod.isDisabled() ? platform::PinLevel::High : platform::PinLevel::Low));
 #endif
 
 	platform::delay_ms(10);

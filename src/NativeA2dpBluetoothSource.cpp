@@ -277,6 +277,9 @@ void NativeA2dpBluetoothSource::_connectionStateChangedTrampoline(esp_a2d_connec
         if (self->_sink != nullptr)
         {
             self->_sink->onConnectionStateChanged(BtConnectionState::Connected);
+            esp_bd_addr_t *bda = self->_a2dp.get_current_peer_address();
+            if (bda != nullptr)
+                self->_sink->onPeerAddressChanged(*bda);
             self->_sink->onPeerNameChanged(self->_a2dp.get_peer_name());
         }
         break;

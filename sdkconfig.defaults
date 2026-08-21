@@ -73,7 +73,7 @@ CONFIG_BT_GATTS_PPCP_CHAR_GAP=y
 # CONFIG_BT_GATTC_ENABLE is not set
 
 # Bond storage (match original: 15)
-CONFIG_BT_SMP_MAX_BONDS=1
+CONFIG_BT_SMP_MAX_BONDS=4
 
 # BLE dynamic env memory
 CONFIG_BT_BLE_DYNAMIC_ENV_MEMORY=y

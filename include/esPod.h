@@ -30,6 +30,22 @@ typedef uint8_t byte;
 constexpr uint32_t INVALID_TIMESTAMP = UINT32_MAX;
 constexpr uint32_t INVALID_TRACK_NUM = UINT32_MAX;
 
+enum class EspodState : uint8_t
+{
+    Disabled,
+    Suspended,
+    Enabled
+};
+
+// TimerCallbackMessage.targetLingo values 0x00/0x03/0x04/0x27/0x29 are real
+// iAP lingo IDs pulled off the wire; 0xFE is reserved for esPod-internal
+// state-machine events (never sent over UART) so they can be marshalled
+// through the same _timerQueue/_timerTask plumbing as the ack timers,
+// out of the FreeRTOS Timer Service task context.
+#define INTERNAL_LINGO 0xFE
+#define INTERNAL_EVT_SUSPEND_TIMEOUT 0x01
+#define INTERNAL_EVT_REENABLE_SETTLE 0x02
+
 class IUart;
 
 class esPod : public IBluetoothSourceEvents
@@ -41,7 +57,6 @@ class esPod : public IBluetoothSourceEvents
 public:
     // State variables
     bool extendedInterfaceModeActive = false;
-    bool disabled = true; // espod starts disabled... it means it keeps flushing the Serial until it is ready to process something
 
     // Metadata variables
 #if TOTAL_NUM_TRACKS == 3
@@ -110,6 +125,14 @@ public:
     uint32_t _lastShuffleToggleTimestamp = INVALID_TIMESTAMP;
 
 public:
+    EspodState state() const { return _state; }
+    bool isDisabled() const { return _state == EspodState::Disabled; }
+
+    /// @brief Deliberate disconnect (e.g. a physical "reset pairing"
+    /// button) - unlike an unexpected BT dropout, this skips the Suspended
+    /// grace period entirely and goes straight to Disabled.
+    void forgetBtConnection();
+
     /// @brief Loads all persisted settings (currently just seek mode) -
     /// call once, explicitly, from setup()/app startup after storage::init()
     /// has run. Deliberately NOT done in the constructor: esPod is normally
@@ -180,6 +203,29 @@ private:
 
     bool _rxIncomplete = false;
 
+    EspodState _state = EspodState::Disabled;
+
+    uint32_t _suspendTimeoutSec = SUSPEND_TIMEOUT_S_DEFAULT;
+
+    uint8_t _lastPeerAddress[6] = {0};
+    bool _hasLastPeerAddress = false;
+
+    bool _explicitDisconnectPending = false;
+    uint32_t _explicitDisconnectRequestedAt = 0;
+    static constexpr uint32_t EXPLICIT_DISCONNECT_WINDOW_MS = 5000;
+
+    TimerHandle_t _suspendTimer = nullptr;
+    static void _suspendTimerCallback(TimerHandle_t xTimer);
+
+    TimerHandle_t _reenableSettleTimer = nullptr;
+    static void _reenableSettleTimerCallback(TimerHandle_t xTimer);
+
+    void _handleBtConnected();
+    void _handleBtDisconnected();
+    void _enterSuspended();
+    void _enterDisabled();
+    void _enterEnabled();
+
     // Device metadata
     std::string _name = ESPIPOD_NAME;
     const uint8_t _SWMajor = 0x01;
@@ -216,6 +262,7 @@ public:
     // IBluetoothSourceEvents - called by the attached Bluetooth backend
     void onConnectionStateChanged(BtConnectionState state) override;
     void onPeerNameChanged(const char *peerName) override;
+    void onPeerAddressChanged(const uint8_t bdAddr[6]) override;
     void onPlayStateChanged(BtPlayState state) override;
     void onTrackMetadata(const TrackMetadata &metadata, byte direction) override;
     void onPlayPosition(uint32_t positionMs) override;

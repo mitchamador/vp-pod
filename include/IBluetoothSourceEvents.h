@@ -40,6 +40,14 @@ public:
     /// an empty name - just rely on onConnectionStateChanged(Disconnected).
     virtual void onPeerNameChanged(const char *peerName) = 0;
 
+    /// @brief Fired right after onConnectionStateChanged(Connected), before
+    /// onPeerNameChanged (name resolution is async and can lag). The BD
+    /// address is available synchronously at connect time, so esPod uses it
+    /// to tell a genuine reconnect of the *same* device apart from a
+    /// *different* device connecting while a previous session is still
+    /// Suspended.
+    virtual void onPeerAddressChanged(const uint8_t bdAddr[6]) = 0;
+
     /// @brief Playback (audio) state changed - e.g. the phone started or
     /// paused streaming audio.
     virtual void onPlayStateChanged(BtPlayState state) = 0;

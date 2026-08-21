@@ -2,16 +2,13 @@
 
 // vpPod
 #ifdef VPPOD
+
 #define TOTAL_NUM_TRACKS 3
 #define SINGLE_DB_CAT_TRACKS
 #define START_INDEX 1
 #define ESPIPOD_NAME "vp-pod"
-#endif
 
-#define TRACK_CHANGE_NOTIFICATION_TIMEOUT 750
-#define FIRST_TIME_TRACK_CHANGE_NOTIFICATION_TIMEOUT 2000
-#define SKIP_PLAYCURRENT_TIMEOUT 1500
-#define FORCED_TRACK_CHANGE_TIMEOUT 1500
+#endif // vpPod
 
 #ifndef ARDUINO
 #define LED_BUILTIN 2
@@ -45,6 +42,20 @@
 // default value for USE_PEER_NAME
 #ifndef USE_PEER_NAME_DEFAULT
 #define USE_PEER_NAME_DEFAULT true
+#endif
+// How long esPod stays "Suspended" (still enabled, DCD held, UART still
+// answered) after an unexpected BT disconnect before finally going
+// Disabled. Stored in seconds (not ms) specifically so it fits int16_t in
+// NVS with headroom - covers both a brief BT blip and a longer "MMI hasn't
+// timed out its own idle-off yet" gap without needing a bigger storage type.
+#ifndef SUSPEND_TIMEOUT_S_DEFAULT
+#define SUSPEND_TIMEOUT_S_DEFAULT 900
+#endif
+// Settle pause between forcing Disabled and re-entering Enabled when a
+// *different* peer reconnects while Suspended - gives the MMI a guaranteed
+// falling+rising edge on DCD so it re-probes the "new" iPod from scratch.
+#ifndef REENABLE_SETTLE_MS_DEFAULT
+#define REENABLE_SETTLE_MS_DEFAULT 2500
 #endif
 
 
@@ -143,7 +154,11 @@
 #if TOTAL_NUM_TRACKS == 3
 
 #ifndef TRACK_CHANGE_NOTIFICATION_TIMEOUT
-#define TRACK_CHANGE_NOTIFICATION_TIMEOUT 500
+#define TRACK_CHANGE_NOTIFICATION_TIMEOUT 750
+#endif
+
+#ifndef FIRST_TIME_TRACK_CHANGE_NOTIFICATION_TIMEOUT
+#define FIRST_TIME_TRACK_CHANGE_NOTIFICATION_TIMEOUT 2000
 #endif
 
 #ifndef SKIP_PLAYCURRENT_TIMEOUT
