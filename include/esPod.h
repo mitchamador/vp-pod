@@ -94,7 +94,7 @@ public:
     byte playStatus = PB_STATE_PAUSED;            // Current state of the PBEngine
     byte playStatusNotificationState = NOTIF_OFF; // Current state of the Notifications engine
     byte trackChangeAckPending = 0x00;            // Indicate there is a pending track change.
-    uint64_t trackChangeTimestamp = 0;            // Trigger for the last track change request. Time outs the pending track change.
+    uint32_t trackChangeTimestamp = 0;            // Trigger for the last track change request. Time outs the pending track change.
     byte shuffleStatus = 0x00;                    // 00 No Shuffle, 0x01 Tracks 0x02 Albums
     byte repeatStatus = 0x00;                     // 00 Repeat off, 01 One track, 02 All tracks
 
@@ -104,6 +104,7 @@ public:
     uint32_t prevTrackIndex = TOTAL_NUM_TRACKS - 1; // Starts at the end of the tracklist
 #else
     uint32_t currentTrackIndex = INVALID_TRACK_NUM;
+    uint32_t pendingTrackIndex = INVALID_TRACK_NUM;
 #endif
 
     const uint32_t totalNumberTracks = TOTAL_NUM_TRACKS;
@@ -112,8 +113,8 @@ public:
     uint32_t trackListPosition = INVALID_TRACK_NUM; // Locator for the position of the track ID in the TrackList (of IDS)
 #else
     uint32_t trackChangeCompletedTimestamp = INVALID_TIMESTAMP;
-    bool _getIndexedPlayingTrackTitleRequested = false;
     bool _firstPbCmdToggle = false;
+    uint32_t pendingSetCurrentPlayingTrackTimestamp = INVALID_TIMESTAMP;
 #endif
 
     bool _usePeerName = USE_PEER_NAME_DEFAULT;
@@ -252,6 +253,9 @@ public:
     explicit esPod(IUart &uart);
     ~esPod();
     void resetState();
+
+    // reset track's state
+    void resetTrackState();
 
     /// @brief Attaches the Bluetooth backend that outgoing playback
     /// commands (play/pause/next/...) are sent to.

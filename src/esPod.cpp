@@ -285,6 +285,8 @@ void esPod::_timerTask(void *pvParameters)
                 }
 #if TOTAL_NUM_TRACKS == 3
                 L0x04::_0x27_PlayStatusNotification(esPodInstance, 0x01, START_INDEX);
+                if (msg.cmdID == L0x04_SetCurrentPlayingTrack)
+                    esPodInstance->pendingSetCurrentPlayingTrackTimestamp = platform::time_now_ms();
 #endif
             }
             else if (msg.targetLingo == 0x03)
@@ -312,6 +314,7 @@ void esPod::_timerTask(void *pvParameters)
                         }
                     } else if (msg.cmdID == 0x01) {
                         // Playback track changed
+                        esPodInstance->currentTrackIndex = esPodInstance->pendingTrackIndex;
                         L0x04::_0x27_PlayStatusNotification(esPodInstance, msg.cmdID,
                             esPodInstance->currentTrackIndex != INVALID_TRACK_NUM ? esPodInstance->currentTrackIndex : START_INDEX);
                     } else if (msg.cmdID == 0x00) {
@@ -674,16 +677,8 @@ void esPod::resetState()
     shuffleStatus = 0x00;
     repeatStatus = 0x02;
 
-    // TrackList variables
-    currentTrackIndex = INVALID_TRACK_NUM;
-#if TOTAL_NUM_TRACKS != 3
-    for (uint16_t i = 0; i < TOTAL_NUM_TRACKS; i++)
-        trackList[i] = 0;
-    trackListPosition = INVALID_TRACK_NUM;
-#else
-    trackChangeCompletedTimestamp = INVALID_TIMESTAMP;
-    _getIndexedPlayingTrackTitleRequested = false;
-#endif
+    resetTrackState();
+
     trackUid = prevTrackUid = INVALID_TRACK_UID;
 
     // Reset the queues
@@ -720,6 +715,22 @@ void esPod::resetState()
     _pendingCmdId_0x04 = 0x00;
     _pendingStatusNotificationCmdId = NO_PENDING_STATUS_NOTIFICATION;
     _pbCmd = 0x00;
+}
+
+void esPod::resetTrackState()
+{
+    // TrackList variables
+    currentTrackIndex = INVALID_TRACK_NUM;
+    pendingTrackIndex = INVALID_TRACK_NUM;
+#if TOTAL_NUM_TRACKS != 3
+    for (uint16_t i = 0; i < TOTAL_NUM_TRACKS; i++)
+        trackList[i] = 0;
+    trackListPosition = INVALID_TRACK_NUM;
+#else
+    trackChangeCompletedTimestamp = INVALID_TIMESTAMP;
+    _firstPbCmdToggle = false;
+    pendingSetCurrentPlayingTrackTimestamp = INVALID_TIMESTAMP;
+#endif
 }
 
 void esPod::attachPlaybackSource(IBluetoothPlaybackSource &btSource)
@@ -940,20 +951,13 @@ void esPod::_applyTrackMetadata(const TrackMetadata *pending, byte direction)
                 trackChangeTimestamp = platform::time_now_ms();
                 L0x04::_0x27_PlayStatusNotification(this, 0x01, direction == BROWSE_DIRECTION_PREV ? 0 : TOTAL_NUM_TRACKS - 1);
             }
-#if 0
-            uint32_t trackNotificationDelay = platform::time_now_ms() - trackChangeTimestamp;
-            if (trackNotificationDelay >= 0 && trackNotificationDelay < TRACK_CHANGE_NOTIFICATION_TIMEOUT)
-            {
-                vTaskDelay(pdMS_TO_TICKS(TRACK_CHANGE_NOTIFICATION_TIMEOUT - trackNotificationDelay));
-            }
+            pendingTrackIndex = START_INDEX;
+            TimerCallbackMessage msg = { .cmdID = 0x01, .targetLingo = 0x27 };
+            scheduleNotification(&msg, TRACK_CHANGE_NOTIFICATION_TIMEOUT);
+            trackChangeCompletedTimestamp = platform::time_now_ms() + TRACK_CHANGE_NOTIFICATION_TIMEOUT;
 #else
-            vTaskDelay(pdMS_TO_TICKS(TRACK_CHANGE_NOTIFICATION_TIMEOUT));
-#endif
-
-            trackChangeCompletedTimestamp = platform::time_now_ms();
-            currentTrackIndex = INVALID_TRACK_NUM;
-#endif
             L0x04::_0x27_PlayStatusNotification(this, 0x01, currentTrackIndex != INVALID_TRACK_NUM ? currentTrackIndex : START_INDEX);
+#endif
         }
     }
 }

@@ -110,6 +110,8 @@ void L0x00::processLingo(esPod *esp, const byte *byteArray, uint32_t len)
         L0x00::_0x27_GetAccessoryInfo(esp, 0x05); // Request the hardware number
         L0x00::_0x27_GetAccessoryInfo(esp, 0x06); // Request the manufacturer name
         L0x00::_0x27_GetAccessoryInfo(esp, 0x07); // Request the model number
+
+        esp->resetTrackState();
     }
     break;
 
