@@ -5,6 +5,8 @@ def get_git_info():
     try:
         shortSHA = ( subprocess.check_output(["git", "rev-parse", "--short" , "HEAD"]).strip().decode("utf-8") )    
         branch = ( subprocess.check_output(["git", "rev-parse", "--abbrev-ref", "HEAD"]).strip().decode("utf-8") )
+        if branch == "HEAD":
+            branch = os.environ.get("GITHUB_REF_NAME", branch)
 
         try:
             tag = subprocess.check_output(["git", "describe", "--tags", "--exact-match"]).strip().decode("utf-8")

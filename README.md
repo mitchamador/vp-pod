@@ -110,6 +110,48 @@ Onboard LED (`LED_BUILTIN`, GPIO2) needs no external wiring.
 
 The project can be built either as a plain Arduino-framework PlatformIO project (`framework = arduino`, ESP32-A2DP backend), or as a native ESP-IDF project (`framework = espidf`, via `idf.py` or PlatformIO) against a patched ESP-IDF providing AAC/aptX codec support. A hybrid `framework = arduino, espidf` build was explored but is not currently used. See `platformio.ini` / `sdkconfig` for the current build configuration.
 
+## ESP32 Flashing Instructions
+
+You can always download the compiled `.zip` archives for your environment from the [Latest Releases](https://github.com/mitchamador/vp-pod/releases/latest) page. 
+
+Extract the downloaded ZIP archive and use one of the tools below to flash your device.
+
+⚠️ **Required Memory Offsets:**
+
+| File | Partition Offset |
+| :--- | :--- |
+| `bootloader.bin` | **`0x1000`** |
+| `partitions.bin` | **`0x8000`** |
+| `firmware.bin` | **`0x10000`** |
+
+#### Method 1: Via Web Browser (Recommended)
+1. Open [ESP Tool](https://espressif.github.io/esptool-js/) in Google Chrome or Microsoft Edge.
+2. Connect your ESP32 to the PC via USB and click **Connect** (select your COM port).
+3. Add all three files (`bootloader.bin`, `partitions.bin`, `firmware.bin`) using the **Add File** button.
+4. Enter their respective offsets shown in the table above.
+5. Click **Erase Flash** to clear flash when flashing first time, then click **Program** and wait for the process to complete.
+
+#### Method 2: Command Line (Linux, macOS, Windows)
+If you have Python installed, you can use the official CLI tool:
+1. Open your terminal inside the extracted folder.
+2. Install `esptool` (if not installed yet):
+   ```bash
+   pip install esptool
+   ```
+3. Run the following command to erase the flash (if needed) and upload new firmware (replace `/dev/ttyUSB0` with your actual serial port):
+   ```bash
+   esptool.py --chip esp32 --port /dev/ttyUSB0 --baud 921600 erase_flash
+   esptool.py --chip esp32 --port /dev/ttyUSB0 --baud 921600 write_flash -z 0x1000 bootloader.bin 0x8000 partitions.bin 0x10000 firmware.bin
+   ```
+
+#### Method 3: Via Flash Download Tool (Windows)
+1. Download and run [Espressif Flash Download Tool](https://docs.espressif.com/projects/esp-test-tools/en/latest/esp32/production_stage/tools/flash_download_tool.html).
+2. Select Chip Type: **ESP32** (WorkMode: *Developer*).
+3. In the top rows, select the paths to the three files and enter their offsets.
+4. Check the **checkboxes** next to all three files.
+5. Select your **COM port** and set the speed (BaudRate) to `115200` or `921600`.
+6. Click **ERASE** to clear flash when flashing first time, then click **START** to flash the device.
+
 ## Origin
 
 This project originated as a fork of **martinroger/ipodesp32**.
