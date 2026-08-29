@@ -50,6 +50,11 @@ public:
     void doSetVolume(uint8_t volume) override;
     uint8_t doGetVolume() override;
 
+    void begin_fast_forward() override { esp_avrc_ct_send_passthrough_cmd(0, ESP_AVRC_PT_CMD_FAST_FORWARD, ESP_AVRC_PT_CMD_STATE_PRESSED); }
+    void end_fast_forward()   override { esp_avrc_ct_send_passthrough_cmd(0, ESP_AVRC_PT_CMD_FAST_FORWARD, ESP_AVRC_PT_CMD_STATE_RELEASED); }
+    void begin_rewind()       override { esp_avrc_ct_send_passthrough_cmd(0, ESP_AVRC_PT_CMD_REWIND, ESP_AVRC_PT_CMD_STATE_PRESSED); }
+    void end_rewind()         override { esp_avrc_ct_send_passthrough_cmd(0, ESP_AVRC_PT_CMD_REWIND, ESP_AVRC_PT_CMD_STATE_RELEASED); }
+
 private:
     BluetoothA2DPSink &_a2dp;
     IAudioOutput *_audioOutput = nullptr;

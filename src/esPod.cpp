@@ -328,29 +328,53 @@ void esPod::_timerTask(void *pvParameters)
             }
             else if (msg.targetLingo == 0x29)
             {
-                if (msg.cmdID == PB_CMD_SEEK_FF)
+                switch (esPodInstance->_seekMode)
                 {
-                    if (esPodInstance->_btSource) {
-                        if (esPodInstance->_seekAsVolume) {
-                            ESP_LOGI(IPOD_TAG, "IBluetoothSource::volume_up()");
-                            esPodInstance->_btSource->volume_up();
-                        } else if (esPodInstance->playStatus == PB_STATE_PLAYING) {
-                            ESP_LOGI(IPOD_TAG, "IBluetoothSource::fast_forward()");
-                            esPodInstance->_btSource->fast_forward();
+                case SeekMode::FastForwardRewindPressHoldRelease:
+                    if (++esPodInstance->_pbCmdTickCount >= MAX_SEEK_HOLD_TICKS) {
+                        ESP_LOGW(IPOD_TAG, "Seek watchdog fired, forcing RELEASED for 0x%02x", esPodInstance->_pbCmd);
+                        if (esPodInstance->_btSource) {
+                            if (esPodInstance->_pbCmd == PB_CMD_SEEK_FF) esPodInstance->_btSource->endFastForward();
+                            else if (esPodInstance->_pbCmd == PB_CMD_SEEK_RW) esPodInstance->_btSource->endRewind();
+                        }
+                        esPodInstance->_pbCmd = 0x00;
+                        xTimerStop(esPodInstance->_pbCmdTimer, 0);
+                    }
+                    break;
+                case SeekMode::VolumeClick:
+                case SeekMode::FastForwardRewindClick:
+                    if (msg.cmdID == PB_CMD_SEEK_FF)
+                    {
+                        if (esPodInstance->_btSource) {
+                            if (esPodInstance->_seekMode == SeekMode::VolumeClick) {
+                                ESP_LOGI(IPOD_TAG, "IBluetoothSource::volume_up()");
+                                esPodInstance->_btSource->volume_up();
+                            } else if (esPodInstance->_seekMode == SeekMode::FastForwardRewindClick) {
+                                if (esPodInstance->playStatus == PB_STATE_PLAYING) {
+                                    ESP_LOGI(IPOD_TAG, "IBluetoothSource::fast_forward()");
+                                    esPodInstance->_btSource->fast_forward();
+                                }
+                            }
                         }
                     }
-                }
-                else if (msg.cmdID == PB_CMD_SEEK_RW)
-                {
-                    if (esPodInstance->_btSource) {
-                        if (esPodInstance->_seekAsVolume) {
-                            ESP_LOGI(IPOD_TAG, "IBluetoothSource::volume_down()");
-                            esPodInstance->_btSource->volume_down();
-                        } else if (esPodInstance->playStatus == PB_STATE_PLAYING) {
-                            ESP_LOGI(IPOD_TAG, "IBluetoothSource::rewind()");
-                            esPodInstance->_btSource->rewind();
+                    else if (msg.cmdID == PB_CMD_SEEK_RW)
+                    {
+                        if (esPodInstance->_btSource) {
+                            if (esPodInstance->_seekMode == SeekMode::VolumeClick) {
+                                ESP_LOGI(IPOD_TAG, "IBluetoothSource::volume_down()");
+                                esPodInstance->_btSource->volume_down();
+                            } else if (esPodInstance->_seekMode == SeekMode::FastForwardRewindClick) {
+                                if (esPodInstance->playStatus == PB_STATE_PLAYING) {
+                                    ESP_LOGI(IPOD_TAG, "IBluetoothSource::rewind()");
+                                    esPodInstance->_btSource->rewind();
+                                }
+                            }
                         }
                     }
+                    break;
+                
+                case SeekMode::MaxMode:
+                    break;
                 }
             }
             else if (msg.targetLingo == INTERNAL_LINGO)
@@ -977,13 +1001,37 @@ void esPod::scheduleNotification(TimerCallbackMessage *msg, uint32_t delay)
 
 void esPod::firePbCmdTimer(uint8_t pbCmd)
 {
-    if (pbCmd == PB_CMD_SEEK_FF || pbCmd == PB_CMD_SEEK_RW) {
+    if (pbCmd == PB_CMD_SEEK_FF || pbCmd == PB_CMD_SEEK_RW)
+    {
+        if (_seekMode == SeekMode::FastForwardRewindPressHoldRelease) {
+            if (_pbCmd == pbCmd) return;
+
+            if (_btSource) {
+                if (_pbCmd == PB_CMD_SEEK_FF) _btSource->endFastForward();
+                else if (_pbCmd == PB_CMD_SEEK_RW) _btSource->endRewind();
+            }
+        }
         _pbCmd = pbCmd;
+        if (_seekMode == SeekMode::FastForwardRewindPressHoldRelease) {
+            _pbCmdTickCount = 0;
+            if (_btSource) {
+                if (pbCmd == PB_CMD_SEEK_FF) _btSource->beginFastForward();
+                else _btSource->beginRewind();
+            }
+        }
         if (xTimerIsTimerActive(_pbCmdTimer) != pdTRUE) {
             ESP_LOGI(IPOD_TAG, "Start pbCmd timer");
             xTimerStart(_pbCmdTimer, 0);
         }
-    } else {
+    }
+    else
+    {
+        if (_seekMode == SeekMode::FastForwardRewindPressHoldRelease) {
+            if (_btSource) {
+                if (_pbCmd == PB_CMD_SEEK_FF) _btSource->endFastForward();
+                else if (_pbCmd == PB_CMD_SEEK_RW) _btSource->endRewind();
+            }
+        }
         _pbCmd = 0x00;
         if (xTimerIsTimerActive(_pbCmdTimer) == pdTRUE) {
             ESP_LOGI(IPOD_TAG, "Stop pbCmd timer");
@@ -992,10 +1040,29 @@ void esPod::firePbCmdTimer(uint8_t pbCmd)
     }
 }
 
+namespace
+{
+    const char *seekModeName(SeekMode mode)
+    {
+        switch (mode)
+        {
+        case SeekMode::VolumeClick:
+            return "volume";
+        case SeekMode::FastForwardRewindClick:
+            return "fast_forward/rewind";
+        case SeekMode::FastForwardRewindPressHoldRelease:
+            return "fast_forward/rewind press/hold/release";
+        case SeekMode::MaxMode:
+            return "maxmode";
+        }
+        return "unknown";
+    }
+}
+
 void esPod::loadSettingsFromStorage()
 {
-    _seekAsVolume = storage::getBool(SettingsKeys::SeekAsVolume, SEEK_MODE_DEFAULT_VOLUME);
-    ESP_LOGI(IPOD_TAG, "Loaded settings: seekAsVolume=%d", _seekAsVolume);
+    _seekMode = static_cast<SeekMode>(storage::getInt(SettingsKeys::SeekMode, static_cast<int>(SEEK_MODE_DEFAULT)));
+    ESP_LOGI(IPOD_TAG, "Loaded settings: seekMode=%d (%s)", static_cast<int>(_seekMode), seekModeName(_seekMode));
     _usePeerName = storage::getBool(SettingsKeys::UsePeerName, USE_PEER_NAME_DEFAULT);
     ESP_LOGI(IPOD_TAG, "Loaded settings: usePeerName=%d", _usePeerName);
     _name = storage::getString(SettingsKeys::esPodName, ESPIPOD_NAME);
@@ -1004,10 +1071,22 @@ void esPod::loadSettingsFromStorage()
     ESP_LOGI(IPOD_TAG, "Loaded settings: suspendTimeoutSec=%lu", (unsigned long)_suspendTimeoutSec);
 }
 
-void esPod::setSeekAsVolume(bool value)
+void esPod::shuffleSwitch()
 {
-    _seekAsVolume = value;
-    storage::setBool(SettingsKeys::SeekAsVolume, value);
+    cycleSeekMode();
+}
+
+void esPod::setSeekMode(SeekMode mode)
+{
+    _seekMode = mode;
+    storage::setInt(SettingsKeys::SeekMode, static_cast<int>(mode));
+}
+
+void esPod::cycleSeekMode()
+{
+    uint8_t next = (static_cast<uint8_t>(_seekMode) + 1) % SEEK_MODE_COUNT;
+    setSeekMode(static_cast<SeekMode>(next));
+    ESP_LOGW(IPOD_TAG, "Seek mode changed to: %s", seekModeName(_seekMode));
 }
 
 #pragma endregion

@@ -4,7 +4,10 @@
 
 namespace SettingsKeys
 {
-    constexpr const char *SeekAsVolume = "seek_as_vol";
+    // "seek_as_vol" (bool) is retired - esPod::SeekMode is now an int,
+    // and NVS doesn't allow reusing a key under a different value type, so
+    // this is a new key rather than a migration.
+    constexpr const char *SeekMode = "seek_mode";
     constexpr const char *TrackPositionFix = "track_pos_fix";
     constexpr const char *ZeroVolumeFix = "zero_vol_fix";
     constexpr const char *Volume = "volume";

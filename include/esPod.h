@@ -30,6 +30,18 @@ typedef uint8_t byte;
 constexpr uint32_t INVALID_TIMESTAMP = UINT32_MAX;
 constexpr uint32_t INVALID_TRACK_NUM = UINT32_MAX;
 
+enum class SeekMode : uint8_t
+{
+    VolumeClick,
+    FastForwardRewindClick,
+    FastForwardRewindPressHoldRelease,
+    MaxMode // sentinel, not a real mode, should remain last
+};
+
+// Keep in sync with the last SeekMode value above - used by
+// esPod::cycleSeekMode() to wrap back around to the first mode.
+constexpr uint8_t SEEK_MODE_COUNT = static_cast<uint8_t>(SeekMode::MaxMode);
+
 enum class EspodState : uint8_t
 {
     Disabled,
@@ -120,10 +132,12 @@ public:
     bool _usePeerName = USE_PEER_NAME_DEFAULT;
     const char *_peer_name = nullptr;
 
-    // Runtime seek mode (see SEEK_MODE_DEFAULT_VOLUME/SEEK_MODE_TOGGLE_WINDOW_MS
+    // Runtime seek mode (see SEEK_MODE_DEFAULT/SHUFFLE_TOGGLE_WINDOW_MS
     // in esPod_conf.h) and the hidden double-shuffle-toggle gesture that flips it.
-    bool _seekAsVolume = SEEK_MODE_DEFAULT_VOLUME;
+    SeekMode _seekMode = SEEK_MODE_DEFAULT;
     uint32_t _lastShuffleToggleTimestamp = INVALID_TIMESTAMP;
+
+    uint16_t _pbCmdTickCount = 0;
 
 public:
     EspodState state() const { return _state; }
@@ -141,10 +155,19 @@ public:
     /// itself is ready - see storage.h.
     void loadSettingsFromStorage();
 
+    /// @brief double-shuffle gesture
+    void shuffleSwitch();
+
     /// @brief Sets and persists the seek mode - use this instead of writing
-    /// _seekAsVolume directly, so every place that changes it (currently
-    /// just the Shuffle gesture in L0x04) doesn't need to remember to save.
-    void setSeekAsVolume(bool value);
+    /// _seekMode directly, so every place that changes it doesn't need to
+    /// remember to save.
+    void setSeekMode(SeekMode mode);
+
+    /// @brief Advances to the next SeekMode (wrapping around), persisting
+    /// the result via setSeekMode(). Currently wired to the hidden
+    /// double-shuffle gesture in L0x04, but public and self-contained so a
+    /// future settings UI (or anything else) can call it directly too.
+    void cycleSeekMode();
 
 private:
     // FreeRTOS Queues

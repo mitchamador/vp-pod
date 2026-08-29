@@ -98,4 +98,29 @@ public:
 
     virtual void doSetVolume(uint8_t volume) = 0;
     virtual uint8_t doGetVolume() = 0;
+
+    virtual void begin_fast_forward() = 0;
+    virtual void begin_rewind() = 0;
+    virtual void end_fast_forward() = 0;
+    virtual void end_rewind() = 0;
+
+    void beginFastForward() {
+        ESP_LOGI("BT_SRC", "begin fast forward");
+        begin_fast_forward();
+    }
+
+    void beginRewind() {
+        ESP_LOGI("BT_SRC", "begin rewind");
+        begin_rewind();
+    }
+
+    void endFastForward() {
+        ESP_LOGI("BT_SRC", "end fast forward");
+        end_fast_forward();
+    }
+    
+    void endRewind() {
+        ESP_LOGI("BT_SRC", "end rewind");
+        end_rewind();
+    }
 };

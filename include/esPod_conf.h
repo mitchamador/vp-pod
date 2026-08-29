@@ -18,18 +18,16 @@
 // #define USE_ESP_IDF_TIME
 // #define USE_ESP_IDF_GPIO
 
-// Seek mode (fast_forward()/rewind() vs. volume_up()/volume_down() as an
-// iOS workaround - AVRCP FF/REW clicks are simply ignored there) is now a
-// runtime flag (esPod::_seekAsVolume), not a build-time #define - see
-// SEEK_MODE_TOGGLE_WINDOW_MS below for how it's flipped in the field.
-#ifndef SEEK_MODE_DEFAULT_VOLUME
-#define SEEK_MODE_DEFAULT_VOLUME false
+// Seek mode is now a runtime flag (esPod::_seekMode, SeekMode enum in
+// esPod.h), not a build-time #define - see SHUFFLE_TOGGLE_WINDOW_MS below
+// for how it's cycled in the field.
+#ifndef SEEK_MODE_DEFAULT
+#define SEEK_MODE_DEFAULT SeekMode::FastForwardRewindPressHoldRelease
 #endif
 // Toggling Shuffle twice within this window (off->on->off or on->off->on)
-// flips the seek mode at runtime - a hidden gesture on existing MMI
-// controls, so no web UI/settings storage is needed for this one flag.
-#ifndef SEEK_MODE_TOGGLE_WINDOW_MS
-#define SEEK_MODE_TOGGLE_WINDOW_MS 3000
+// calls shuffleSwitch().
+#ifndef SHUFFLE_TOGGLE_WINDOW_MS
+#define SHUFFLE_TOGGLE_WINDOW_MS 3000
 #endif
 // default value for TRACK_POSITION_FIX
 #ifndef TRACK_POSITION_FIX_DEFAULT
@@ -149,6 +147,10 @@
 
 #ifndef AVRC_RECEIVE_METADATA_TIMEOUT
 #define AVRC_RECEIVE_METADATA_TIMEOUT 250
+#endif
+
+#ifndef MAX_SEEK_HOLD_TICKS
+#define MAX_SEEK_HOLD_TICKS 120 // 120 * 250ms = 30s watchdog
 #endif
 
 #if TOTAL_NUM_TRACKS == 3
