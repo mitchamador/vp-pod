@@ -1078,6 +1078,16 @@ void esPod::shuffleSwitch()
 
 void esPod::setSeekMode(SeekMode mode)
 {
+    // Leaving PressHoldRelease mid-hold must not strand the peer with a
+    // PRESSED that never gets its RELEASED - send it here before the mode
+    // actually changes, so every caller (not just the Shuffle gesture) is
+    // covered, not just cycleSeekMode().
+    if (_seekMode == SeekMode::FastForwardRewindPressHoldRelease && _seekMode != mode) {
+        if (_btSource) {
+            if (_pbCmd == PB_CMD_SEEK_FF) _btSource->endFastForward();
+            else if (_pbCmd == PB_CMD_SEEK_RW) _btSource->endRewind();
+        }
+    }
     _seekMode = mode;
     storage::setInt(SettingsKeys::SeekMode, static_cast<int>(mode));
 }
