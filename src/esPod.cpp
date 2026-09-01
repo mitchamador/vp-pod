@@ -752,7 +752,6 @@ void esPod::resetTrackState()
     trackListPosition = INVALID_TRACK_NUM;
 #else
     trackChangeCompletedTimestamp = INVALID_TIMESTAMP;
-    _firstPbCmdToggle = false;
     pendingSetCurrentPlayingTrackTimestamp = INVALID_TIMESTAMP;
 #endif
 }
@@ -966,7 +965,7 @@ void esPod::_applyTrackMetadata(const TrackMetadata *pending, byte direction)
 
         ESP_LOGD(IPOD_TAG, "Artist+Album+Title+Duration : True -> False");
         // Inform the car
-        if (playStatusNotificationState == NOTIF_ON)
+        if (playStatusNotificationState == NOTIF_ON && currentTrackIndex != INVALID_TRACK_NUM)
         {
 #if TOTAL_NUM_TRACKS == 3
             // force Audi MMI to redraw track's information

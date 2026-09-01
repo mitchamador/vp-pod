@@ -330,7 +330,6 @@ void L0x04::processLingo(esPod *esp, const byte *byteArray, uint32_t len)
             }
 
 #if TOTAL_NUM_TRACKS == 3
-            esp->_firstPbCmdToggle = true;
             if (esp->currentTrackIndex == INVALID_TRACK_NUM)
                 esp->currentTrackIndex = START_INDEX;
 
@@ -475,8 +474,7 @@ void L0x04::processLingo(esPod *esp, const byte *byteArray, uint32_t len)
                 else
                 {
 #if TOTAL_NUM_TRACKS == 3
-                    if (!esp->_firstPbCmdToggle) {
-                        esp->_firstPbCmdToggle = true;
+                    if (esp->currentTrackIndex == INVALID_TRACK_NUM) {
                         ESP_LOGI(IPOD_TAG, "Change play status to PB_STATE_PLAYING");
                         L0x04::_0x27_PlayStatusNotification(esp, 0x01, 0);
                         TimerCallbackMessage msg = { .cmdID = 0x01, .targetLingo = 0x27 };

@@ -125,7 +125,6 @@ public:
     uint32_t trackListPosition = INVALID_TRACK_NUM; // Locator for the position of the track ID in the TrackList (of IDS)
 #else
     uint32_t trackChangeCompletedTimestamp = INVALID_TIMESTAMP;
-    bool _firstPbCmdToggle = false;
     uint32_t pendingSetCurrentPlayingTrackTimestamp = INVALID_TIMESTAMP;
 #endif
 
