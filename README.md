@@ -157,3 +157,5 @@ If you have Python installed, you can use the official CLI tool:
 This project originated as a fork of **martinroger/ipodesp32**.
 
 The original source tree was cleaned up and the project has since evolved independently with a focus on Audi MMI 3G compatibility, modular architecture, and platform abstraction.
+
+The project is fully open-source and officially licensed under the permissive **MIT License**. You are free to use, modify, and redistribute this firmware for any purpose, including commercial projects, as long as the original copyright notice is included.
