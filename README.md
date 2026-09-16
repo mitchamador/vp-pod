@@ -95,7 +95,7 @@ The UDA1334A's analog output feeds the MMI's own audio-in pins on the same 12-pi
 | GPIO27 | BCLK | |
 | GPIO25 | WSEL (LRCLK) | |
 | GPIO26 | DIN | |
-| 3V3 | VIN | |
+| 5V | VIN | |
 | GND | GND | UDA1334A generates its own system clock - no MCLK pin to wire |
 
 | UDA1334A | MMI connector, pin | Signal |
