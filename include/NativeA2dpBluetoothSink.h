@@ -9,6 +9,7 @@
 #include <string.h>
 #include <stdint.h>
 #include <string>
+#include <atomic>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/queue.h"
@@ -143,6 +144,15 @@ private:
     _lock_t s_volume_lock;
     uint8_t s_volume = 0;
     bool s_volume_notify = false;
+    // Q15 linear gain applied to PCM in data_cb(), recomputed (not per
+    // sample) whenever s_volume changes; 32768 == unity gain. This is a
+    // local, always-on complement to AVRC absolute volume: not every
+    // controller actually attenuates its own output in response to our
+    // ESP_AVRC_TG_SET_ABSOLUTE_VOLUME_CMD_EVT / RN responses, so without
+    // this the MMI volume can silently do nothing depending on the peer.
+    std::atomic<int32_t> s_volume_gain_q15{32768};
+    uint8_t *volume_scratch = nullptr;
+    size_t volume_scratch_capacity = 0;
 
     // Connection
     esp_a2d_connection_state_t connection_state = ESP_A2D_CONNECTION_STATE_DISCONNECTED;
@@ -211,6 +221,7 @@ private:
     void av_notify_evt_handler(uint8_t event_id, esp_avrc_rn_param_t *event_parameter);
     void volume_set_by_controller(uint8_t volume);
     void volume_set_by_local_host(uint8_t volume);
+    static int32_t compute_volume_gain_q15(uint8_t volume);
     void av_new_track();
     void av_playback_changed();
     void av_play_pos_changed();

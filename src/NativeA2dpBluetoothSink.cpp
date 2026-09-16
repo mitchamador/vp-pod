@@ -38,7 +38,7 @@ struct bt_app_msg_t {
 };
 
 NativeA2DPSink::NativeA2DPSink() { instance = this; _lock_init(&s_volume_lock); }
-NativeA2DPSink::~NativeA2DPSink() { if (app_task_handle) { end(true); } }
+NativeA2DPSink::~NativeA2DPSink() { if (app_task_handle) { end(true); } free(volume_scratch); }
 
 void NativeA2DPSink::gap_cb_trampoline(esp_bt_gap_cb_event_t e, esp_bt_gap_cb_param_t *p) { if (instance) instance->gap_cb(e,p); }
 void NativeA2DPSink::a2d_cb_trampoline(esp_a2d_cb_event_t e, esp_a2d_cb_param_t *p) { if (instance) instance->a2d_cb(e,p); }
@@ -356,7 +356,33 @@ void NativeA2DPSink::av_hdl_a2d_evt(uint16_t event, void *p_param) {
 
 void NativeA2DPSink::data_cb(const uint8_t *data, uint32_t len) {
     if (raw_stream_reader) raw_stream_reader(data, len);
-    if (stream_reader) stream_reader(data, len);
+    if (stream_reader) {
+        int32_t gain = s_volume_gain_q15.load(std::memory_order_relaxed);
+        if (gain >= 32767) {
+            // Unity gain - forward untouched, skip the copy/multiply.
+            stream_reader(data, len);
+        } else if (len >= sizeof(int16_t)) {
+            if (volume_scratch_capacity < len) {
+                uint8_t *grown = (uint8_t *)realloc(volume_scratch, len);
+                if (grown) { volume_scratch = grown; volume_scratch_capacity = len; }
+            }
+            if (volume_scratch && volume_scratch_capacity >= len) {
+                const int16_t *src = (const int16_t *)data;
+                int16_t *dst = (int16_t *)volume_scratch;
+                size_t sample_count = len / sizeof(int16_t);
+                for (size_t i = 0; i < sample_count; i++) {
+                    dst[i] = (int16_t)(((int32_t)src[i] * gain) >> 15);
+                }
+                if (len & 1) volume_scratch[len - 1] = data[len - 1]; // stray trailing byte, shouldn't happen for 16-bit PCM
+                stream_reader(volume_scratch, len);
+            } else {
+                // Scratch alloc failed - fail safe to unattenuated audio.
+                stream_reader(data, len);
+            }
+        } else {
+            stream_reader(data, len);
+        }
+    }
     if (data_received) data_received();
 }
 
@@ -457,8 +483,21 @@ void NativeA2DPSink::volume_down() { volume_set_by_local_host(s_volume > 5 ? s_v
 void NativeA2DPSink::set_volume(uint8_t v) { volume_set_by_local_host(v < 0x7f ? v : 0x7f); }
 int  NativeA2DPSink::get_volume()  { _lock_acquire(&s_volume_lock); int v=s_volume; _lock_release(&s_volume_lock); return v; }
 
+int32_t NativeA2DPSink::compute_volume_gain_q15(uint8_t volume) {
+    // Cubic curve, same idea as ESP32-A2DP's default A2DPVolumeControl -
+    // cheap approximation of perceived (roughly logarithmic) loudness.
+    // volume is AVRC-scale 0..0x7f.
+    float v = (float)volume / (float)0x7f;
+    float g = v * v * v;
+    int32_t q15 = (int32_t)(g * 32768.0f + 0.5f);
+    if (q15 > 32768) q15 = 32768;
+    if (q15 < 0) q15 = 0;
+    return q15;
+}
+
 void NativeA2DPSink::volume_set_by_controller(uint8_t volume) {
     _lock_acquire(&s_volume_lock); s_volume = volume; _lock_release(&s_volume_lock);
+    s_volume_gain_q15.store(compute_volume_gain_q15(volume), std::memory_order_relaxed);
     if (volumechange_cb) volumechange_cb(volume);
     if (s_volume_notify) {
         esp_avrc_rn_param_t rn_param; rn_param.volume = s_volume;
@@ -470,6 +509,7 @@ void NativeA2DPSink::volume_set_by_controller(uint8_t volume) {
 
 void NativeA2DPSink::volume_set_by_local_host(uint8_t volume) {
     _lock_acquire(&s_volume_lock); s_volume = volume; _lock_release(&s_volume_lock);
+    s_volume_gain_q15.store(compute_volume_gain_q15(volume), std::memory_order_relaxed);
     if (volumechange_cb) volumechange_cb(volume);
     if (s_volume_notify) {
         esp_avrc_rn_param_t rn_param; rn_param.volume = s_volume;
