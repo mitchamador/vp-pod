@@ -138,6 +138,9 @@ public:
 
     uint16_t _pbCmdTickCount = 0;
 
+    bool _translitTrackTitle = TRANSLIT_TRACK_TITLE_DEFAULT;
+    static bool transliterateRussian(const char *src, char *dst);
+
 public:
     EspodState state() const { return _state; }
     bool isDisabled() const { return _state == EspodState::Disabled; }

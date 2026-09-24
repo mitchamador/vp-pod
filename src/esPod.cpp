@@ -931,6 +931,129 @@ uint64_t esPod::_uidToU64(const uint8_t uid[8])
     return v;
 }
 
+/// @brief Transliterates Russian Cyrillic characters from UTF-8 to Latin characters.
+/// @param src Source UTF-8 string.
+/// @param dst Destination buffer.
+/// @return true if at least one Russian character was transliterated, false otherwise.
+bool esPod::transliterateRussian(const char *src, char *dst)
+{
+    static const struct
+    {
+        unsigned char c1;
+        unsigned char c2;
+        const char *text;
+    } map[] =
+    {
+        { 0xD0, 0x90, "A" },    // А
+        { 0xD0, 0x91, "B" },    // Б
+        { 0xD0, 0x92, "V" },    // В
+        { 0xD0, 0x93, "G" },    // Г
+        { 0xD0, 0x94, "D" },    // Д
+        { 0xD0, 0x95, "E" },    // Е
+        { 0xD0, 0x96, "Zh" },   // Ж
+        { 0xD0, 0x97, "Z" },    // З
+        { 0xD0, 0x98, "I" },    // И
+        { 0xD0, 0x99, "Y" },    // Й
+        { 0xD0, 0x9A, "K" },    // К
+        { 0xD0, 0x9B, "L" },    // Л
+        { 0xD0, 0x9C, "M" },    // М
+        { 0xD0, 0x9D, "N" },    // Н
+        { 0xD0, 0x9E, "O" },    // О
+        { 0xD0, 0x9F, "P" },    // П
+        { 0xD0, 0xA0, "R" },    // Р
+        { 0xD0, 0xA1, "S" },    // С
+        { 0xD0, 0xA2, "T" },    // Т
+        { 0xD0, 0xA3, "U" },    // У
+        { 0xD0, 0xA4, "F" },    // Ф
+        { 0xD0, 0xA5, "Kh" },   // Х
+        { 0xD0, 0xA6, "Ts" },   // Ц
+        { 0xD0, 0xA7, "Ch" },   // Ч
+        { 0xD0, 0xA8, "Sh" },   // Ш
+        { 0xD0, 0xA9, "Shch" }, // Щ
+        { 0xD0, 0xAA, "" },     // Ъ
+        { 0xD0, 0xAB, "Y" },    // Ы
+        { 0xD0, 0xAC, "" },     // Ь
+        { 0xD0, 0xAD, "E" },    // Э
+        { 0xD0, 0xAE, "Yu" },   // Ю
+        { 0xD0, 0xAF, "Ya" },   // Я
+
+        { 0xD0, 0xB0, "a" },    // а
+        { 0xD0, 0xB1, "b" },    // б
+        { 0xD0, 0xB2, "v" },    // в
+        { 0xD0, 0xB3, "g" },    // г
+        { 0xD0, 0xB4, "d" },    // д
+        { 0xD0, 0xB5, "e" },    // е
+        { 0xD0, 0xB6, "zh" },   // ж
+        { 0xD0, 0xB7, "z" },    // з
+        { 0xD0, 0xB8, "i" },    // и
+        { 0xD0, 0xB9, "y" },    // й
+        { 0xD0, 0xBA, "k" },    // к
+        { 0xD0, 0xBB, "l" },    // л
+        { 0xD0, 0xBC, "m" },    // м
+        { 0xD0, 0xBD, "n" },    // н
+        { 0xD0, 0xBE, "o" },    // о
+        { 0xD0, 0xBF, "p" },    // п
+
+        { 0xD1, 0x80, "r" },    // р
+        { 0xD1, 0x81, "s" },    // с
+        { 0xD1, 0x82, "t" },    // т
+        { 0xD1, 0x83, "u" },    // у
+        { 0xD1, 0x84, "f" },    // ф
+        { 0xD1, 0x85, "kh" },   // х
+        { 0xD1, 0x86, "ts" },   // ц
+        { 0xD1, 0x87, "ch" },   // ч
+        { 0xD1, 0x88, "sh" },   // ш
+        { 0xD1, 0x89, "shch" }, // щ
+        { 0xD1, 0x8A, "" },     // ъ
+        { 0xD1, 0x8B, "y" },    // ы
+        { 0xD1, 0x8C, "" },     // ь
+        { 0xD1, 0x8D, "e" },    // э
+        { 0xD1, 0x8E, "yu" },   // ю
+        { 0xD1, 0x8F, "ya" },   // я
+
+        { 0xD0, 0x81, "Yo" },   // Ё
+        { 0xD1, 0x91, "yo" }    // ё
+    };
+
+    bool translated = false;
+    char *out = dst;
+
+    while (*src && (out - dst) < 254)
+    {
+        const unsigned char c1 = (unsigned char)src[0];
+        const unsigned char c2 = (unsigned char)src[1];
+
+        const char *replacement = NULL;
+
+        for (unsigned int i = 0; i < sizeof(map) / sizeof(map[0]); ++i)
+        {
+            if (map[i].c1 == c1 && map[i].c2 == c2)
+            {
+                replacement = map[i].text;
+                break;
+            }
+        }
+
+        if (replacement != NULL)
+        {
+            translated = true;
+
+            while (*replacement && (out - dst) < 254)
+                *out++ = *replacement++;
+
+            src += 2;
+        }
+        else
+        {
+            *out++ = *src++;
+        }
+    }
+
+    *out = '\0';
+
+    return translated;
+}
+
 void esPod::_applyTrackMetadata(const TrackMetadata *pending, byte direction)
 {
     // always update track duration
@@ -939,9 +1062,20 @@ void esPod::_applyTrackMetadata(const TrackMetadata *pending, byte direction)
     // check if metadata changed
     if (strcmp(pending->title, trackTitle) != 0 || strcmp(pending->album, albumName) != 0 || strcmp(pending->artist, artistName) != 0)
     {
-        strcpy(trackTitle, pending->title);
-        strcpy(artistName, pending->artist);
-        strcpy(albumName, pending->album);
+        char transliteratedTitle[255];
+
+        if (_translitTrackTitle && transliterateRussian(pending->title, transliteratedTitle)) {
+            // russian track title => trackTitle = translit, artistName = pending->title, albumName = pending->artist
+            ESP_LOGI(IPOD_TAG, "Original title: %s, transliterated title: %s", pending->title, transliteratedTitle);
+            strcpy(trackTitle, transliteratedTitle);
+            strcpy(artistName, pending->title);
+            strcpy(albumName, pending->artist);
+        } else {
+            // nothing to translit
+            strcpy(trackTitle, pending->title);
+            strcpy(artistName, pending->artist);
+            strcpy(albumName, pending->album);
+        }
 
         byte _trackChangeAckPending = trackChangeAckPending;
         if (trackChangeAckPending > 0x00)
@@ -1068,6 +1202,8 @@ void esPod::loadSettingsFromStorage()
     ESP_LOGI(IPOD_TAG, "Loaded settings: esPodName=%s", _name.c_str());
     _suspendTimeoutSec = storage::getInt(SettingsKeys::SuspendTimeoutSec, SUSPEND_TIMEOUT_S_DEFAULT);
     ESP_LOGI(IPOD_TAG, "Loaded settings: suspendTimeoutSec=%lu", (unsigned long)_suspendTimeoutSec);
+    _translitTrackTitle = storage::getBool(SettingsKeys::TranslitTrackTitle, TRANSLIT_TRACK_TITLE_DEFAULT);
+    ESP_LOGI(IPOD_TAG, "Loaded settings: translitTrackTitle=%d", _translitTrackTitle);
 }
 
 void esPod::shuffleSwitch()

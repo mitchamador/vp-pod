@@ -14,4 +14,5 @@ namespace SettingsKeys
     constexpr const char *UsePeerName = "use_peer_name";
     constexpr const char *esPodName = "espod_name";
     constexpr const char *SuspendTimeoutSec = "suspend_timeout_s";
+    constexpr const char *TranslitTrackTitle = "translit_track_title";
 }

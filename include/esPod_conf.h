@@ -41,6 +41,11 @@
 #ifndef USE_PEER_NAME_DEFAULT
 #define USE_PEER_NAME_DEFAULT true
 #endif
+// default valut for TRANSLIT_TRACK_TITLE
+#ifndef TRANSLIT_TRACK_TITLE_DEFAULT
+#define TRANSLIT_TRACK_TITLE_DEFAULT true
+#endif
+
 // How long esPod stays "Suspended" (still enabled, DCD held, UART still
 // answered) after an unexpected BT disconnect before finally going
 // Disabled. Stored in seconds (not ms) specifically so it fits int16_t in
