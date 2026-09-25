@@ -281,7 +281,13 @@ void NativeA2dpBluetoothSource::_connectionStateChangedTrampoline(esp_a2d_connec
             if (bda != nullptr)
                 self->_sink->onPeerAddressChanged(*bda);
             self->_sink->onPeerNameChanged(self->_a2dp.get_peer_name());
+            if (bda != nullptr)
+                self->_rememberPeerName(*bda, self->_a2dp.get_peer_name());
         }
+        // See IBluetoothPlaybackSource::_sweepStalePeerNames() for why this
+        // runs here (every successful connect) rather than only when the
+        // bond table actually changes.
+        self->_sweepStalePeerNames();
         break;
     case ESP_A2D_CONNECTION_STATE_DISCONNECTED:
         ESP_LOGI("BT_SRC", "ESP_A2D_CONNECTION_STATE_DISCONNECTED");

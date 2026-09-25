@@ -622,9 +622,36 @@ void NativeA2DPSink::set_last_connection(esp_bd_addr_t bda) {
 }
 
 void NativeA2DPSink::clean_last_connection() {
+    static const esp_bd_addr_t zero_bda = {0};
+    bool have_target = memcmp(last_connection, zero_bda, sizeof(zero_bda)) != 0;
+
+    if (have_target) {
+        // Actually forget the pairing at the Bluetooth stack level, not
+        // just our own autoreconnect-target NVS blob below - previously
+        // this only cleared app-level state, so a "forgotten" device kept
+        // reconnecting because it was still bonded. last_connection (not
+        // peer_bd_addr) is used deliberately: it's kept current on every
+        // successful connect (see set_last_connection() below) and, unlike
+        // peer_bd_addr, stays valid even when clean_last_connection() is
+        // called with no active connection.
+        esp_err_t err = esp_bt_gap_remove_bond_device(last_connection);
+        ESP_LOGI(TAG, "remove_bond_device(%02x:%02x:%02x:%02x:%02x:%02x): %s",
+                 last_connection[0], last_connection[1], last_connection[2],
+                 last_connection[3], last_connection[4], last_connection[5],
+                 esp_err_to_name(err));
+    }
+
     nvs_handle_t handle;
     if (nvs_open("a2dp", NVS_READWRITE, &handle) == ESP_OK) {
         nvs_erase_key(handle, "last_bda");
+        if (have_target) {
+            // Drop this device's cached peer name too (see
+            // IBluetoothPlaybackSource::_rememberPeerName/_sweepStalePeerNames
+            // for where the pn_* cache is normally written/swept) - don't
+            // wait for the next sweep to catch up.
+            char key[16]; mac_to_key(last_connection, key);
+            nvs_erase_key(handle, key);
+        }
         nvs_commit(handle);
         nvs_close(handle);
     }
@@ -633,6 +660,12 @@ void NativeA2DPSink::clean_last_connection() {
     if (reconnect_timer) {
         esp_timer_stop(reconnect_timer); // no-op if not running
     }
+}
+
+void NativeA2DPSink::mac_to_key(const esp_bd_addr_t bda, char out[16]) {
+    // "pn_" + 12 hex chars = 15 chars, right at the NVS key length limit.
+    snprintf(out, 16, "pn_%02x%02x%02x%02x%02x%02x",
+             bda[0], bda[1], bda[2], bda[3], bda[4], bda[5]);
 }
 
 const char *NativeA2DPSink::get_peer_name() {

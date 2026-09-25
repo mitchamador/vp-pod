@@ -2,6 +2,8 @@
 #include "Esp32A2dpBluetoothSource.h"
 #include "esPod_conf.h"
 #include "platform.h"
+#include "esp_gap_bt_api.h"
+#include "nvs.h"
 #include <cstring>
 
 #ifndef AVRC_QUEUE_SIZE
@@ -97,6 +99,40 @@ bool Esp32A2dpBluetoothSource::isConnected() const
 
 void Esp32A2dpBluetoothSource::forgetConnection()
 {
+    static const esp_bd_addr_t zero_bda = {0};
+    esp_bd_addr_t *last = _a2dp.get_last_peer_address();
+    bool have_target = last != nullptr && memcmp(*last, zero_bda, sizeof(zero_bda)) != 0;
+
+    if (have_target)
+    {
+        // Actually forget the pairing at the Bluetooth stack level -
+        // BluetoothA2DPCommon::clean_last_connection() (below) only clears
+        // the library's own last-connection NVS blob (confirmed by reading
+        // its source: it just zeroes and re-persists last_connection), not
+        // the real bond. Same gap NativeA2DPSink had, same fix.
+        // get_last_peer_address() (not get_current_peer_address()) so this
+        // also works when called with no active connection - it must run
+        // before clean_last_connection() zeroes it out below.
+        esp_err_t err = esp_bt_gap_remove_bond_device(*last);
+        ESP_LOGI("BT_SRC", "remove_bond_device(%02x:%02x:%02x:%02x:%02x:%02x): %s",
+                 (*last)[0], (*last)[1], (*last)[2], (*last)[3], (*last)[4], (*last)[5],
+                 esp_err_to_name(err));
+
+        // Drop this device's cached peer name too (see
+        // IBluetoothPlaybackSource::_rememberPeerName/_sweepStalePeerNames
+        // for where the pn_* cache is normally written/swept) - don't wait
+        // for the next sweep to catch up.
+        char key[16];
+        _macToKey(*last, key);
+        nvs_handle_t handle;
+        if (nvs_open("a2dp", NVS_READWRITE, &handle) == ESP_OK)
+        {
+            nvs_erase_key(handle, key);
+            nvs_commit(handle);
+            nvs_close(handle);
+        }
+    }
+
     if (_a2dp.get_connection_state() != ESP_A2D_CONNECTION_STATE_DISCONNECTED)
     {
         _a2dp.disconnect();
@@ -250,7 +286,13 @@ void Esp32A2dpBluetoothSource::_connectionStateChangedTrampoline(esp_a2d_connect
             if (bda != nullptr)
                 self->_sink->onPeerAddressChanged(*bda);
             self->_sink->onPeerNameChanged(self->_a2dp.get_peer_name());
+            if (bda != nullptr)
+                self->_rememberPeerName(*bda, self->_a2dp.get_peer_name());
         }
+        // See IBluetoothPlaybackSource::_sweepStalePeerNames() for why this
+        // runs here (every successful connect) rather than only when the
+        // bond table actually changes.
+        self->_sweepStalePeerNames();
         break;
     case ESP_A2D_CONNECTION_STATE_DISCONNECTED:
         ESP_LOGI("BT_SRC", "ESP_A2D_CONNECTION_STATE_DISCONNECTED");

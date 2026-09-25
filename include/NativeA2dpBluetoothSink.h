@@ -230,4 +230,12 @@ private:
     bool has_last_connection();
     void get_last_connection();
     void set_last_connection(esp_bd_addr_t bda);
+
+    // Used only to erase this device's cached-peer-name entry (see
+    // clean_last_connection()) as part of a real unpair. The shared
+    // upsert/sweep logic for that cache lives in IBluetoothPlaybackSource
+    // and is driven from NativeA2dpBluetoothSource instead - NativeA2DPSink
+    // deliberately mirrors BluetoothA2DPSink's API surface and doesn't
+    // implement that interface, so it can't reuse those methods directly.
+    static void mac_to_key(const esp_bd_addr_t bda, char out[16]);
 };
