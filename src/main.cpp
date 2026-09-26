@@ -1,4 +1,6 @@
 #include "esPod.h"
+#include "esp_mac.h"
+#include <string>
 #ifdef ARDUINO
 #include "AudioTools.h"
 #include "BluetoothA2DPSink.h"
@@ -158,6 +160,7 @@ void initializeSDCard();
 void initializeSerial();
 void initializeAudioOutput();
 void initializeStorage();
+std::string resolveBtSinkName();
 #pragma endregion
 
 #ifndef ARDUINO
@@ -234,7 +237,8 @@ void setup()
 
 	espod.attachPlaybackSource(btSource);
 
-	btSource.begin(A2DP_SINK_NAME);
+	std::string btSinkName = resolveBtSinkName();
+	btSource.begin(btSinkName.c_str());
 
 #ifdef UART1_RST // Re-enable the UART1 transceiver if available
 	platform::gpio_write(UART1_RST, platform::PinLevel::High);
@@ -344,6 +348,32 @@ void initializeStorage()
 	espod.loadSettingsFromStorage();
 	btSource.loadSettingsFromStorage();
 	audioOutput.loadSettingsFromStorage();
+}
+
+/// @brief Resolves the Bluetooth-advertised device name: whatever's been
+/// persisted, or - on first boot, before anything's been persisted - the
+/// A2DP_SINK_NAME default with a MAC-derived suffix appended, so two units
+/// flashed from the same build show up as distinct Bluetooth devices
+/// without editing a #define per board. The chosen default is persisted
+/// immediately so it stays stable across reboots (and is what a future web
+/// UI would show/let you override), rather than being recomputed from
+/// scratch - harmlessly identically - every boot.
+std::string resolveBtSinkName()
+{
+	std::string stored = storage::getString(SettingsKeys::BtSinkName, "");
+	if (!stored.empty()) return stored;
+
+	// Last 3 bytes of the chip's base MAC - the first 3 are the Espressif
+	// OUI and identical across every one of our own boards, so only the
+	// tail is actually distinguishing.
+	uint8_t mac[6] = {0};
+	esp_efuse_mac_get_default(mac);
+	char suffix[7];
+	snprintf(suffix, sizeof(suffix), "%02X%02X%02X", mac[3], mac[4], mac[5]);
+
+	std::string name = std::string(A2DP_SINK_NAME) + "-" + suffix;
+	storage::setString(SettingsKeys::BtSinkName, name);
+	return name;
 }
 
 #pragma endregion
